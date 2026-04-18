@@ -48,6 +48,16 @@ export function getRepoStatus(id: number): Promise<RepoStatus> {
 export function getAllStatuses(): Promise<RepoStatus[]> {
   return invoke("get_all_statuses");
 }
+/**
+ * Streaming refresh — fires the backend command and resolves with the
+ * number of spawned tasks. Per-repo `RepoStatus` payloads arrive as
+ * `repo-status-updated` tauri events and must be handled by a listener.
+ * See reposStore.applyStatusUpdate / App.tsx event wiring.
+ */
+export function refreshAllStatuses(): Promise<number> {
+  return invoke("refresh_all_statuses");
+}
+export const EVENT_REPO_STATUS_UPDATED = "repo-status-updated";
 export function getRepoLog(id: number, count: number): Promise<Commit[]> {
   return invoke("get_repo_log", { id, count });
 }

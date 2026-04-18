@@ -33,6 +33,7 @@ export interface RepoStatus {
   diverged: boolean;
   unpushedNoUpstream: number | null;
   commitCount: number | null;
+  lastRefreshedAt: string | null;
   error: string | null;
 }
 

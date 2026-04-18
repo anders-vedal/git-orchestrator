@@ -64,6 +64,10 @@ pub struct RepoStatus {
     /// when the count fails — used by the dashboard to sort by repo size.
     #[serde(rename = "commitCount")]
     pub commit_count: Option<u32>,
+    /// RFC3339 timestamp of when this status row was computed. Lets the UI
+    /// show staleness ("refreshed 45s ago") and gate manual retries.
+    #[serde(rename = "lastRefreshedAt")]
+    pub last_refreshed_at: Option<String>,
     pub error: Option<String>,
 }
 

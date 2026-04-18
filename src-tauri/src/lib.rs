@@ -33,6 +33,7 @@ pub fn run() {
             // status
             status::get_repo_status,
             status::get_all_statuses,
+            status::refresh_all_statuses,
             status::get_repo_log,
             status::get_changed_files,
             // git ops

@@ -274,8 +274,16 @@ export function RepoRow({ status, dragDisabled = false }: Props) {
             </div>
           )}
 
-          <div className="mt-1 text-[11px] text-zinc-500">
-            Last fetch: {timeAgo(status.lastFetch)}
+          <div className="mt-1 flex items-center gap-3 text-[11px] text-zinc-500">
+            <span>Last fetch: {timeAgo(status.lastFetch)}</span>
+            {status.lastRefreshedAt && (
+              <span
+                className="text-zinc-600"
+                title="When the dashboard last re-read this repo's git state from disk (no network)"
+              >
+                · refreshed {timeAgo(status.lastRefreshedAt)}
+              </span>
+            )}
           </div>
         </div>
 
