@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActionLogEntry,
+  ActivityEntry,
   BulkPullReport,
   BulkResult,
   ChangedFiles,
@@ -48,6 +49,16 @@ export function getRepoStatus(id: number): Promise<RepoStatus> {
 export function getAllStatuses(): Promise<RepoStatus[]> {
   return invoke("get_all_statuses");
 }
+/**
+ * Streaming refresh — fires the backend command and resolves with the
+ * number of spawned tasks. Per-repo `RepoStatus` payloads arrive as
+ * `repo-status-updated` tauri events and must be handled by a listener.
+ * See reposStore.applyStatusUpdate / App.tsx event wiring.
+ */
+export function refreshAllStatuses(): Promise<number> {
+  return invoke("refresh_all_statuses");
+}
+export const EVENT_REPO_STATUS_UPDATED = "repo-status-updated";
 export function getRepoLog(id: number, count: number): Promise<Commit[]> {
   return invoke("get_repo_log", { id, count });
 }
@@ -75,11 +86,20 @@ export function gitCommitPush(
 ): Promise<CommitPushResult> {
   return invoke("git_commit_push", { id, message, push });
 }
-export function gitFetchAll(): Promise<BulkResult[]> {
-  return invoke("git_fetch_all");
+/**
+ * Bulk fetch. `ids` undefined = every repo; otherwise restrict to the
+ * supplied set. Returns one BulkResult per repo actually attempted.
+ */
+export function gitFetchAll(ids?: number[]): Promise<BulkResult[]> {
+  return invoke("git_fetch_all", { ids: ids ?? null });
 }
-export function gitPullAllSafe(): Promise<BulkPullReport> {
-  return invoke("git_pull_all_safe");
+/**
+ * Bulk safe pull. Same `ids` semantics as gitFetchAll. The backend
+ * filters AND applies per-repo safety gates (default branch, clean tree);
+ * a selected repo that fails a gate lands in `report.skipped`.
+ */
+export function gitPullAllSafe(ids?: number[]): Promise<BulkPullReport> {
+  return invoke("git_pull_all_safe", { ids: ids ?? null });
 }
 export function undoLastAction(id: number): Promise<ForcePullResult> {
   return invoke("undo_last_action", { id });
@@ -129,6 +149,23 @@ export function getSetting(key: string): Promise<string | null> {
 }
 export function setSetting(key: string, value: string): Promise<void> {
   return invoke("set_setting", { key, value });
+}
+
+// ---- activity ----
+/**
+ * Cross-repo activity feed: commits on HEAD across every registered repo,
+ * authored in the last `days` days, up to `limitPerRepo` per repo,
+ * merged and time-sorted newest-first. One git log call per repo, fanned
+ * out in parallel. HEAD-only — feature-branch activity isn't included.
+ */
+export function getActivityFeed(
+  days: number,
+  limitPerRepo?: number,
+): Promise<ActivityEntry[]> {
+  return invoke("get_activity_feed", {
+    days,
+    limitPerRepo: limitPerRepo ?? null,
+  });
 }
 
 // ---- scan / ignore ----

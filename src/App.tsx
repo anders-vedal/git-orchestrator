@@ -1,5 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
+import type { RepoStatus } from "./types";
+import { EVENT_REPO_STATUS_UPDATED } from "./lib/tauri";
+import { ActivityFeedDialog } from "./components/dialogs/ActivityFeedDialog";
 import { AddRepoDialog } from "./components/dialogs/AddRepoDialog";
 import { BulkResultDialog } from "./components/dialogs/BulkResultDialog";
 import { CommitPushDialog } from "./components/dialogs/CommitPushDialog";
@@ -24,6 +27,7 @@ function App() {
   const refreshIntervalSec = useSettingsStore((s) => s.settings.refreshIntervalSec);
   const loadAll = useReposStore((s) => s.loadAll);
   const refreshAll = useReposStore((s) => s.refreshAll);
+  const applyStatusUpdate = useReposStore((s) => s.applyStatusUpdate);
   const statuses = useReposStore((s) => s.statuses);
   const bulkInProgress = useUiStore((s) => s.bulkInProgress);
   const setBulkInProgress = useUiStore((s) => s.setBulkInProgress);
@@ -61,6 +65,21 @@ function App() {
   useEffect(() => {
     void api.setTrayTooltip(buildTooltip(statuses)).catch(() => {});
   }, [statuses]);
+
+  // Streaming refresh: the backend emits one `repo-status-updated` event
+  // per repo as each finishes. Register once at mount; the store patches
+  // rows as events arrive.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    void listen<RepoStatus>(EVENT_REPO_STATUS_UPDATED, (e) => {
+      applyStatusUpdate(e.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [applyStatusUpdate]);
 
   // Tray menu "Fetch all" -> run the same flow as the sidebar button.
   useEffect(() => {
@@ -108,6 +127,7 @@ function App() {
       <BulkResultDialog />
       <GitErrorDialog />
       <SettingsDialog />
+      <ActivityFeedDialog />
       <InfoDialog />
     </div>
   );

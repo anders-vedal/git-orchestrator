@@ -3,6 +3,11 @@ use crate::git::{log, remote, status};
 use crate::models::{ChangedFiles, Commit, Dirty, Repo, RepoStatus};
 use std::path::Path;
 use std::time::UNIX_EPOCH;
+use tauri::{AppHandle, Emitter};
+
+/// Event emitted for each repo as its status is recomputed by
+/// `refresh_all_statuses`. Payload is the full `RepoStatus`.
+pub const EVENT_REPO_STATUS_UPDATED: &str = "repo-status-updated";
 
 fn read_last_fetch(repo_path: &Path) -> Option<String> {
     let mut p = repo_path.to_path_buf();
@@ -35,6 +40,7 @@ pub fn build_status(repo: &Repo) -> RepoStatus {
         diverged: false,
         unpushed_no_upstream: None,
         commit_count: None,
+        last_refreshed_at: Some(chrono::Utc::now().to_rfc3339()),
         error: None,
     };
 
@@ -114,6 +120,32 @@ pub async fn get_all_statuses() -> Result<Vec<RepoStatus>, String> {
         }
     }
     Ok(out)
+}
+
+/// Streaming refresh: spawns a blocking task per repo, emits
+/// [`EVENT_REPO_STATUS_UPDATED`] with the fresh `RepoStatus` as each one
+/// finishes, and returns the spawned-task count immediately so the UI can
+/// flip a "refreshing" indicator without waiting for the slowest repo.
+///
+/// Unlike `get_all_statuses`, this command does NOT block on the join set —
+/// fire-and-forget is the whole point. The frontend listens for the event
+/// and patches each row as it arrives.
+#[tauri::command]
+pub async fn refresh_all_statuses(app: AppHandle) -> Result<usize, String> {
+    let repos = db::with_conn(|c| crate::db::queries::list_repos(c))?;
+    let count = repos.len();
+
+    for repo in repos {
+        let app_clone = app.clone();
+        tokio::task::spawn_blocking(move || {
+            let status = build_status(&repo);
+            // Emit errors are non-fatal — if the window closed mid-refresh,
+            // we drop the update silently.
+            let _ = app_clone.emit(EVENT_REPO_STATUS_UPDATED, &status);
+        });
+    }
+
+    Ok(count)
 }
 
 #[tauri::command]

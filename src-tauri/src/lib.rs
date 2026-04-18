@@ -5,7 +5,7 @@ mod models;
 mod tray;
 mod util;
 
-use commands::{git_ops, repos, scan, settings, status, system};
+use commands::{activity, git_ops, repos, scan, settings, status, system};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,6 +33,7 @@ pub fn run() {
             // status
             status::get_repo_status,
             status::get_all_statuses,
+            status::refresh_all_statuses,
             status::get_repo_log,
             status::get_changed_files,
             // git ops
@@ -64,6 +65,8 @@ pub fn run() {
             scan::list_ignored_paths,
             scan::ignore_path,
             scan::unignore_path,
+            // activity feed
+            activity::get_activity_feed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

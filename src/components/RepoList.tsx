@@ -12,13 +12,14 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { Folders, SearchX } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   applyFilterSort,
   isFilterActive,
   useFilterStore,
 } from "../stores/filterStore";
 import { useReposStore } from "../stores/reposStore";
+import { useSelectionStore } from "../stores/selectionStore";
 import { RepoRow } from "./RepoRow";
 import { RepoToolbar } from "./RepoToolbar";
 
@@ -33,12 +34,45 @@ export function RepoList() {
   const filter = useFilterStore((s) => s.filter);
   const reset = useFilterStore((s) => s.reset);
 
+  const selectionCount = useSelectionStore((s) => s.selectedIds.size);
+  const clearSelection = useSelectionStore((s) => s.clear);
+  const toggleAllVisible = useSelectionStore((s) => s.toggleAllVisible);
+
   const visible = useMemo(
     () => applyFilterSort(statuses, search, sortBy, sortDir, filter),
     [statuses, search, sortBy, sortDir, filter],
   );
+  const visibleIds = useMemo(() => visible.map((s) => s.id), [visible]);
   const filtersActive = isFilterActive(search, sortBy, filter);
-  const dragEnabled = !filtersActive;
+  // Drag is disabled when filters hide rows (reordering the full list
+  // through a partial view is incoherent) OR when 2+ rows are selected
+  // (drag-one-of-many semantics are ambiguous — clear selection first).
+  const dragEnabled = !filtersActive && selectionCount < 2;
+
+  // Global keyboard: Ctrl/Cmd+A to toggle-all-visible, Esc to clear.
+  // Skipped when focus is in an input so typing in the search box etc.
+  // doesn't hijack selection.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isTyping =
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        target?.isContentEditable === true;
+      if (isTyping) return;
+
+      if (e.key === "Escape" && selectionCount > 0) {
+        e.preventDefault();
+        clearSelection();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+        e.preventDefault();
+        toggleAllVisible(visibleIds);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectionCount, clearSelection, toggleAllVisible, visibleIds]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -106,7 +140,12 @@ export function RepoList() {
               strategy={verticalListSortingStrategy}
             >
               {visible.map((s) => (
-                <RepoRow key={s.id} status={s} dragDisabled={!dragEnabled} />
+                <RepoRow
+                  key={s.id}
+                  status={s}
+                  dragDisabled={!dragEnabled}
+                  visibleIds={visibleIds}
+                />
               ))}
             </SortableContext>
           </DndContext>

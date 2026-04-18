@@ -48,6 +48,20 @@ const MIGRATIONS: &[(&str, &str)] = &[
         ON action_log(repo_id, started_at DESC);
     "#,
     ),
+    (
+        // Groundwork for Phase 2 workspace / snapshot ops: a single logical
+        // multi-repo action (e.g. "switch 5 repos to feat/auth") writes N
+        // action_log rows tied together by group_id. Single-repo actions
+        // keep group_id = NULL. The index lets a future undo query fetch
+        // every row of a group in one shot.
+        "004_action_log_groups",
+        r#"
+    ALTER TABLE action_log ADD COLUMN group_id TEXT;
+
+    CREATE INDEX IF NOT EXISTS idx_action_log_group
+        ON action_log(group_id);
+    "#,
+    ),
 ];
 
 pub fn apply(conn: &Connection) -> Result<(), rusqlite::Error> {

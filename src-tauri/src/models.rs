@@ -64,6 +64,10 @@ pub struct RepoStatus {
     /// when the count fails — used by the dashboard to sort by repo size.
     #[serde(rename = "commitCount")]
     pub commit_count: Option<u32>,
+    /// RFC3339 timestamp of when this status row was computed. Lets the UI
+    /// show staleness ("refreshed 45s ago") and gate manual retries.
+    #[serde(rename = "lastRefreshedAt")]
+    pub last_refreshed_at: Option<String>,
     pub error: Option<String>,
 }
 
@@ -202,6 +206,11 @@ pub struct ActionLogEntry {
     pub started_at: String,
     #[serde(rename = "durationMs")]
     pub duration_ms: i64,
+    /// Shared identifier tying together the rows of a single multi-repo
+    /// logical action (Phase 2 workspace/snapshot ops). `None` for
+    /// single-repo actions.
+    #[serde(rename = "groupId")]
+    pub group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +225,23 @@ pub struct IgnoredPath {
     pub path: String,
     #[serde(rename = "addedAt")]
     pub added_at: String,
+}
+
+/// One commit from the cross-repo activity feed. Flattens `Commit` +
+/// the owning repo's id/name so the frontend can render a unified list
+/// without a second lookup. Produced by `get_activity_feed`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityEntry {
+    #[serde(rename = "repoId")]
+    pub repo_id: i64,
+    #[serde(rename = "repoName")]
+    pub repo_name: String,
+    pub sha: String,
+    #[serde(rename = "shaShort")]
+    pub sha_short: String,
+    pub author: String,
+    pub timestamp: String,
+    pub message: String,
 }
 
 /// One candidate surfaced by `scan_folder`. `path` is already normalized.

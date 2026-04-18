@@ -16,6 +16,7 @@ type DialogKind =
       hasUpstream: boolean;
     }
   | { kind: "settings" }
+  | { kind: "activityFeed" }
   | { kind: "bulkFetchResult"; title: string; results: BulkResult[] }
   | { kind: "bulkPullResult"; title: string; report: BulkPullReport }
   | { kind: "gitError"; title: string; error: string; repoId?: number }

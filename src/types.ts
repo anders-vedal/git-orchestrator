@@ -33,6 +33,7 @@ export interface RepoStatus {
   diverged: boolean;
   unpushedNoUpstream: number | null;
   commitCount: number | null;
+  lastRefreshedAt: string | null;
   error: string | null;
 }
 
@@ -120,6 +121,9 @@ export interface ActionLogEntry {
   stderrExcerpt: string | null;
   startedAt: string;
   durationMs: number;
+  /** Shared identifier tying multi-repo action rows together (Phase 2+).
+   *  null for single-repo actions like force_pull or commit_push. */
+  groupId: string | null;
 }
 
 export interface IgnoredPath {
@@ -147,6 +151,21 @@ export interface ScanSkip {
 export interface ScanAddResult {
   added: Repo[];
   skipped: ScanSkip[];
+}
+
+/**
+ * One entry in the cross-repo activity feed. Backend flattens `Commit`
+ * into the repo context so the frontend can render a unified list
+ * without extra lookups.
+ */
+export interface ActivityEntry {
+  repoId: number;
+  repoName: string;
+  sha: string;
+  shaShort: string;
+  author: string;
+  timestamp: string;
+  message: string;
 }
 
 export type TerminalPref =
