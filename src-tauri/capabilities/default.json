@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "dialog:default",
+    "os:allow-platform",
     {
       "identifier": "opener:allow-open-url",
       "allow": [

@@ -156,23 +156,102 @@ fn launch_cmd(path: &str) -> Result<(), String> {
     spawn_visible(cmd)
 }
 
-#[cfg(not(windows))]
-fn launch_terminal(_pref: &str, path: &Path) -> Result<(), String> {
-    // Fallback for dev on mac/linux — just open the system terminal.
-    #[cfg(target_os = "macos")]
-    {
-        let mut cmd = Command::new("open");
-        cmd.args(["-a", "Terminal", path.to_str().unwrap_or(".")]);
-        return spawn_visible(cmd);
+#[cfg(target_os = "macos")]
+fn launch_terminal(pref: &str, path: &Path) -> Result<(), String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "path contains non-utf8 characters".to_string())?;
+
+    match pref {
+        "iterm2" => launch_macos_app("iTerm", path_str),
+        "terminal" => launch_macos_app("Terminal", path_str),
+        _ => {
+            // auto — prefer iTerm when installed, otherwise Terminal.
+            if std::path::Path::new("/Applications/iTerm.app").exists() {
+                if launch_macos_app("iTerm", path_str).is_ok() {
+                    return Ok(());
+                }
+            }
+            launch_macos_app("Terminal", path_str)
+        }
     }
-    #[cfg(target_os = "linux")]
-    {
-        let mut cmd = Command::new("x-terminal-emulator");
-        cmd.args(["--working-directory", path.to_str().unwrap_or(".")]);
-        return spawn_visible(cmd);
+}
+
+#[cfg(target_os = "macos")]
+fn launch_macos_app(app_name: &str, path: &str) -> Result<(), String> {
+    // `open -a <app> <path>` opens <path> in <app>. For Terminal/iTerm
+    // this opens a new window with the working directory set to <path>.
+    let mut cmd = Command::new("open");
+    cmd.args(["-a", app_name, path]);
+    spawn_visible(cmd)
+}
+
+#[cfg(target_os = "linux")]
+fn launch_terminal(pref: &str, path: &Path) -> Result<(), String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "path contains non-utf8 characters".to_string())?;
+
+    match pref {
+        "gnome-terminal" => launch_linux_terminal("gnome-terminal", path_str),
+        "konsole" => launch_linux_terminal("konsole", path_str),
+        "alacritty" => launch_linux_terminal("alacritty", path_str),
+        "kitty" => launch_linux_terminal("kitty", path_str),
+        "xterm" => launch_linux_terminal("xterm", path_str),
+        _ => {
+            // auto — walk a sensible preference order, skipping any that
+            // aren't on PATH. `x-terminal-emulator` is the Debian/Ubuntu
+            // alternatives-system default and is the last resort before
+            // plain `xterm`.
+            for candidate in [
+                "gnome-terminal",
+                "konsole",
+                "alacritty",
+                "kitty",
+                "x-terminal-emulator",
+                "xterm",
+            ] {
+                if which(candidate) {
+                    if launch_linux_terminal(candidate, path_str).is_ok() {
+                        return Ok(());
+                    }
+                }
+            }
+            Err("no terminal emulator found on PATH".to_string())
+        }
     }
-    #[allow(unreachable_code)]
-    Err("unsupported platform".to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn which(name: &str) -> bool {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    for dir in std::env::split_paths(&path) {
+        if dir.join(name).exists() {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "linux")]
+fn launch_linux_terminal(name: &str, path: &str) -> Result<(), String> {
+    let mut cmd = Command::new(name);
+    // Different emulators spell "start here" differently:
+    //   gnome-terminal / konsole / x-terminal-emulator / alacritty → --working-directory
+    //   kitty → --directory
+    //   xterm → no cwd flag, inherit from spawn's current_dir
+    match name {
+        "xterm" => {
+            cmd.current_dir(path);
+        }
+        "kitty" => {
+            cmd.args(["--directory", path]);
+        }
+        _ => {
+            cmd.args(["--working-directory", path]);
+        }
+    }
+    spawn_visible(cmd)
 }
 
 fn ensure_http_https(url: &str) -> Result<(), String> {

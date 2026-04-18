@@ -5,19 +5,26 @@ use crate::util::normalize_path;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn canonical(path: &str) -> Result<PathBuf, String> {
-    // Reject UNC/network paths before anything touches the filesystem —
-    // `git -C \\server\share` operates on attacker-controlled content and
-    // combines with other vectors (hostile .git/config) to fire RCE on the
-    // refresh timer. If a user needs a network-hosted repo, they should
-    // mount it to a drive letter first.
-    let lowered = path.trim_start().to_ascii_lowercase();
-    if lowered.starts_with(r"\\") || lowered.starts_with("//") {
-        return Err(format!(
-            "refused: UNC/network paths are not allowed ({path}). Map the share to a drive letter first."
-        ));
-    }
-    if lowered.starts_with(r"\\?\unc\") {
-        return Err(format!("refused: UNC paths are not allowed ({path})."));
+    // On Windows, reject UNC/network paths before anything touches the
+    // filesystem — `git -C \\server\share` operates on attacker-controlled
+    // content and combines with other vectors (hostile .git/config) to fire
+    // RCE on the refresh timer. If a user needs a network-hosted repo, they
+    // should mount it to a drive letter first.
+    //
+    // On mac/linux the concept doesn't apply — paths beginning with `/` are
+    // the normal case, and network mounts surface as local paths under
+    // /Volumes or /mnt that are indistinguishable from local disks here.
+    #[cfg(windows)]
+    {
+        let lowered = path.trim_start().to_ascii_lowercase();
+        if lowered.starts_with(r"\\") || lowered.starts_with("//") {
+            return Err(format!(
+                "refused: UNC/network paths are not allowed ({path}). Map the share to a drive letter first."
+            ));
+        }
+        if lowered.starts_with(r"\\?\unc\") {
+            return Err(format!("refused: UNC paths are not allowed ({path})."));
+        }
     }
 
     let p = PathBuf::from(path);

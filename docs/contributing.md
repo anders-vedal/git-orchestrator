@@ -232,6 +232,9 @@ from the frontend or filesystem, think about:
    normalization — use `find_repo_by_normalized_path` (normalize both sides)
    rather than the raw SQLite UNIQUE index for correctness.
 
-The test suite in `util.rs::tests` covers drive-letter case, slash style,
-trailing separators, collapsed doubles, UNC prefix, whitespace, and
-idempotency. Extend it if you add a new edge case.
+The test suite in `util.rs::tests` is split: `#[cfg(all(test, windows))]`
+covers drive-letter case, backslash style, collapsed doubles, UNC prefix;
+`#[cfg(all(test, not(windows)))]` covers double-slash collapse, trailing
+slash handling, case preservation. Both cover whitespace trim and
+idempotency. Extend the right module when you add a new edge case. Only
+the tests for the current build target run under `cargo test --lib`.

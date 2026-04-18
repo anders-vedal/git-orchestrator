@@ -1,0 +1,61 @@
+name: Cross-platform check
+
+# One-off validation: does the cfg-gated mac/linux code compile, and do
+# the platform-specific `normalize_path` tests pass on each host?
+# Safe to delete this file after the port is verified.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libayatana-appindicator3-dev \
+            build-essential \
+            libssl-dev \
+            libxdo-dev \
+            pkg-config
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Frontend install + typecheck + build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Rust unit tests
+        working-directory: src-tauri
+        run: cargo test --lib --verbose
+
+      - name: Rust full compile (catches unused cfg branches)
+        working-directory: src-tauri
+        run: cargo check --all-targets

@@ -27,17 +27,52 @@ _(Not included in the repo. Run the app to see it.)_
 - **System tray** — minimise-to-tray on close, right-click menu with Show
   Window / Fetch All / Quit, tooltip shows live status summary (behind/dirty/
   error counts).
-- **Settings** — terminal preference (Windows Terminal → Git Bash → cmd), auto-
-  refresh interval, default browse directory, theme (dark/light/system).
+- **Settings** — terminal preference (platform-aware: wt/git-bash/cmd on Windows,
+  Terminal/iTerm2 on macOS, gnome-terminal/konsole/alacritty/kitty/xterm on
+  Linux), auto-refresh interval, default browse directory, theme (dark/light/
+  system).
+
+## Supported platforms
+
+Primary target is Windows 11 (x64 + ARM64). macOS and Linux builds run via
+`npm run tauri dev` / `npm run tauri build` but are **dev-quality**: no signed
+installers, no CI matrix. See the build prerequisites below.
 
 ## Quick start
 
 ```bash
-# prerequisites: Node 20+, Rust stable, MSVC Build Tools (Windows)
 npm install
 npm run tauri dev             # hot-reload dev (frontend + Rust)
-npm run tauri build           # MSI + NSIS installers under src-tauri/target/release/bundle/
+npm run tauri build           # platform-native installer under src-tauri/target/release/bundle/
 ```
+
+Build output per host:
+- **Windows** → `.msi` (MSI) + `.exe` (NSIS) under `bundle/{msi,nsis}/`
+- **macOS** → `.dmg` + `.app` under `bundle/{dmg,macos}/` (unsigned — new installs
+  need `xattr -cr "Repo Dashboard.app"` before first launch)
+- **Linux** → `.deb` + `.AppImage` (+ `.rpm` where toolchain supports it) under
+  `bundle/{deb,appimage,rpm}/`
+
+### Prerequisites
+
+| OS | Toolchain |
+|---|---|
+| Windows | Node 20+, Rust stable, MSVC Build Tools, WebView2 (preinstalled on Win11) |
+| macOS | Node 20+, Rust stable, `xcode-select --install` |
+| Linux (Ubuntu/Debian) | Node 20+, Rust stable, plus apt deps (next line) |
+
+Debian/Ubuntu apt deps:
+```
+sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+                 libayatana-appindicator3-dev build-essential \
+                 curl wget file libssl-dev libxdo-dev pkg-config
+```
+Fedora/Arch equivalents are listed in the
+[Tauri prerequisites page](https://v2.tauri.app/start/prerequisites/).
+
+**Linux tray caveat**: GNOME 40+ removed native status-tray support. The tray
+icon works out of the box on KDE, XFCE, Cinnamon, and MATE. On GNOME you need
+the AppIndicator extension installed.
 
 Rust tests:
 ```bash

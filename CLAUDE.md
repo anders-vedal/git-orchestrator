@@ -19,8 +19,12 @@ Single-user Windows desktop app ("Repo Dashboard") for monitoring and syncing
 CLI (never `git2`/libgit2) for behaviour parity with the user's terminal.
 
 **Target**: Windows 11 ARM64 primary, Windows x64 secondary. macOS/Linux are
-not supported — several modules (`commands/system.rs`, tray icon behaviour, the
-terminal launcher chain) assume Windows semantics.
+dev-quality — code compiles and the core flow runs, but there's no CI matrix,
+no signed installers, no release pipeline. Platform-specific behaviour is
+cfg-gated (`commands/system.rs` terminal launchers, `util::normalize_path`,
+UNC rejection in `commands/repos.rs`). When you add platform-dependent code,
+follow the `#[cfg(windows)]` / `#[cfg(target_os = "macos")]` /
+`#[cfg(target_os = "linux")]` pattern already used in those modules.
 
 ## Tech stack
 
@@ -35,8 +39,10 @@ npm run tauri dev      # hot-reload frontend; Rust rebuilds on change
 npm run tauri build    # MSI + NSIS installers under src-tauri/target/release/bundle/
 ```
 
-**Prerequisites:** Node 20+, Rust stable via rustup, MSVC Build Tools.
-WebView2 is preinstalled on Win11.
+**Prerequisites:** Node 20+, Rust stable via rustup.
+- **Windows**: MSVC Build Tools (WebView2 preinstalled on Win11)
+- **macOS**: `xcode-select --install`
+- **Linux (Debian/Ubuntu)**: `sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev libayatana-appindicator3-dev build-essential libssl-dev libxdo-dev pkg-config`
 
 Rust tests (pure parsers only — they don't touch a real repo):
 ```bash
@@ -104,10 +110,13 @@ conflict.
     refresh timer. See `HARDENING_FLAGS` in `git/runner.rs` and the residual
     risks (SSH command, aliases, hooks) catalogued in `docs/security.md`.
 
-11. **UNC paths are rejected at add-time.** `commands/repos.rs::canonical`
-    refuses paths beginning with `\\` or `//`. Running `git -C \\server\share`
-    on the refresh timer combines with hostile-config vectors, so network
-    repos must be mounted to a drive letter before being added.
+11. **UNC paths are rejected at add-time (Windows only).** `commands/repos.rs::canonical`
+    refuses paths beginning with `\\` or `//` under `#[cfg(windows)]`. Running
+    `git -C \\server\share` on the refresh timer combines with hostile-config
+    vectors, so network repos must be mounted to a drive letter before being
+    added. On mac/linux the gate doesn't fire — `/` is the normal filesystem
+    root and network mounts surface under `/Volumes` or `/mnt`
+    indistinguishable from local disks.
 
 12. **Settings keys are allowlisted server-side.** `commands/settings.rs::ALLOWED_KEYS`
     mirrors the `KEY_MAP` in `settingsStore.ts`. A compromised renderer
@@ -115,13 +124,23 @@ conflict.
     stay in sync.
 
 13. **Repo paths are stored normalized.** Every insert into `repos.path` and
-    `ignored_paths.path` runs through `util::normalize_path` (uppercase drive
-    letter, forward→backslashes, strip trailing separators, collapse double
-    backslashes, preserve UNC prefix). This is how `C:\Projects\foo` and
-    `c:/projects/foo/` collapse to the same row — dedup correctness in
-    `add_repo` and the scan flow depends on it. Existing pre-normalization
-    rows may exist, so `find_repo_by_normalized_path` normalizes on both
-    sides of the comparison rather than relying on the SQLite UNIQUE index.
+    `ignored_paths.path` runs through `util::normalize_path`. The rules are
+    **platform-specific**:
+    - **Windows**: uppercase drive letter, forward→backslashes, strip trailing
+      separators, collapse double backslashes, preserve UNC prefix. Collapses
+      `C:\Projects\foo` and `c:/projects/foo/` to one row.
+    - **Unix (mac/linux)**: trim whitespace, collapse `//` runs to `/`, strip
+      trailing `/`, preserve case (case is meaningful for git on both macOS
+      APFS and Linux filesystems).
+
+    Dedup correctness in `add_repo` and the scan flow depends on this.
+    Existing pre-normalization rows may exist, so `find_repo_by_normalized_path`
+    normalizes on both sides of the comparison rather than relying on the
+    SQLite UNIQUE index.
+
+    A SQLite DB created on one platform is NOT portable to another — the
+    stored path strings follow that platform's separator/case rules and won't
+    round-trip cleanly.
 
 14. **Scan-and-ignore is path-set algebra.** "Scan folder…" lists direct
     children of a parent folder that `is_git_repo()` answers true for, and

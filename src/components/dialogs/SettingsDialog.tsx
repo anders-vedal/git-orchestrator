@@ -1,12 +1,43 @@
 import { open as openSystemDialog } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, Loader2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { getPlatform, type HostOS } from "../../lib/platform";
 import * as api from "../../lib/tauri";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useUiStore } from "../../stores/uiStore";
 import type { IgnoredPath, Settings, TerminalPref, ThemePref } from "../../types";
 import { Button, IconButton } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
+
+const TERMINAL_OPTIONS: Record<HostOS, { value: TerminalPref; label: string }[]> = {
+  windows: [
+    { value: "auto", label: "Auto (Windows Terminal → Git Bash → cmd)" },
+    { value: "wt", label: "Windows Terminal (wt.exe)" },
+    { value: "git-bash", label: "Git Bash" },
+    { value: "cmd", label: "cmd.exe" },
+  ],
+  macos: [
+    { value: "auto", label: "Auto (iTerm → Terminal)" },
+    { value: "terminal", label: "Terminal" },
+    { value: "iterm2", label: "iTerm2" },
+  ],
+  linux: [
+    { value: "auto", label: "Auto (first available on PATH)" },
+    { value: "gnome-terminal", label: "GNOME Terminal" },
+    { value: "konsole", label: "Konsole (KDE)" },
+    { value: "alacritty", label: "Alacritty" },
+    { value: "kitty", label: "kitty" },
+    { value: "xterm", label: "xterm" },
+  ],
+  other: [{ value: "auto", label: "Auto" }],
+};
+
+const DIR_PLACEHOLDERS: Record<HostOS, string> = {
+  windows: "C:\\Projects",
+  macos: "/Users/you/Projects",
+  linux: "/home/you/projects",
+  other: "",
+};
 
 export function SettingsDialog() {
   const dialog = useUiStore((s) => s.dialog);
@@ -19,6 +50,22 @@ export function SettingsDialog() {
   const [busy, setBusy] = useState(false);
   const [ignored, setIgnored] = useState<IgnoredPath[]>([]);
   const [ignoredLoading, setIgnoredLoading] = useState(false);
+  const [host, setHost] = useState<HostOS>("windows");
+
+  useEffect(() => {
+    let cancelled = false;
+    void getPlatform().then((os) => {
+      if (!cancelled) setHost(os);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const terminalOptions = TERMINAL_OPTIONS[host];
+  const terminalValue = terminalOptions.some((o) => o.value === draft.terminal)
+    ? draft.terminal
+    : ("auto" as TerminalPref);
 
   const refreshIgnored = useCallback(async () => {
     setIgnoredLoading(true);
@@ -93,16 +140,17 @@ export function SettingsDialog() {
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium text-zinc-400">Terminal</span>
           <select
-            value={draft.terminal}
+            value={terminalValue}
             onChange={(e) =>
               setDraft({ ...draft, terminal: e.currentTarget.value as TerminalPref })
             }
             className="rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-zinc-100 focus:border-blue-400 focus:outline-none"
           >
-            <option value="auto">Auto (Windows Terminal → Git Bash → cmd)</option>
-            <option value="wt">Windows Terminal (wt.exe)</option>
-            <option value="git-bash">Git Bash</option>
-            <option value="cmd">cmd.exe</option>
+            {terminalOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
           </select>
         </label>
 
@@ -140,7 +188,7 @@ export function SettingsDialog() {
                   defaultReposDir: e.currentTarget.value || null,
                 })
               }
-              placeholder="C:\\Projects"
+              placeholder={DIR_PLACEHOLDERS[host]}
               className="flex-1 rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-zinc-100 focus:border-blue-400 focus:outline-none"
             />
             <Button icon={<FolderOpen size={14} />} onClick={browse}>

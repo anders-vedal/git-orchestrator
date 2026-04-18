@@ -122,7 +122,21 @@ export interface ScanAddResult {
   skipped: ScanSkip[];
 }
 
-export type TerminalPref = "auto" | "wt" | "git-bash" | "cmd";
+export type TerminalPref =
+  | "auto"
+  // Windows
+  | "wt"
+  | "git-bash"
+  | "cmd"
+  // macOS
+  | "terminal"
+  | "iterm2"
+  // Linux
+  | "gnome-terminal"
+  | "konsole"
+  | "alacritty"
+  | "kitty"
+  | "xterm";
 export type ThemePref = "dark" | "light" | "system";
 
 export interface Settings {

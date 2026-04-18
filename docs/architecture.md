@@ -111,13 +111,13 @@ Example: user clicks **Fetch** on a repo row.
 | `lib.rs` | `run()` builds the Tauri app: inits DB, registers plugins (dialog, opener), sets up tray, wires `on_window_event`, registers all `#[tauri::command]` handlers. The canonical list of exposed commands lives here. |
 | `models.rs` | Shared structs crossing the IPC boundary: `Repo`, `Commit`, `RepoStatus` (with `hasSubmodules` / `diverged` / `unpushedNoUpstream`), `Dirty`, `DirtyBreakdown`, `BulkResult` (with `reason: BulkReason`), `BulkPullReport`, `ForcePullPreview`, `ForcePullResult`, `ActionLogEntry`. `#[serde(rename_all = "lowercase")]` on `Dirty` / `BulkReason` and `#[serde(rename = "camelCase")]` on status fields keep JSON snake_case→camelCase consistent with the TS types. |
 | `tray.rs` | Tray icon, menu, click handling, close-to-tray behaviour. Exposes `set_tooltip()` called by the `set_tray_tooltip` command. |
-| `commands/repos.rs` | Repo registry CRUD. `add_repo` normalizes the path (`util::normalize_path`), verifies it's a real working tree (`git/runner.rs::is_git_repo`), then dedup-checks via `find_repo_by_normalized_path` before inserting. `canonical()` rejects UNC / network paths. |
+| `commands/repos.rs` | Repo registry CRUD. `add_repo` normalizes the path (`util::normalize_path`), verifies it's a real working tree (`git/runner.rs::is_git_repo`), then dedup-checks via `find_repo_by_normalized_path` before inserting. `canonical()` rejects UNC / network paths under `#[cfg(windows)]`; on mac/linux the check is a no-op. |
 | `commands/status.rs` | Builds `RepoStatus` objects. `get_all_statuses` parallelises across repos via `spawn_blocking`. `read_last_fetch` reads `.git/FETCH_HEAD`'s mtime rather than shelling out to git. |
 | `commands/git_ops.rs` | Shell-out commands: `git_fetch`, `git_pull_ff`, `git_force_pull` (with default-branch guard), `git_fetch_all`, `git_pull_all_safe`, `force_pull_preview` (pre-action disclosure), `undo_last_action`, `get_action_log`, `diagnose_auth` (re-runs fetch with `GIT_TRACE`). Bulk commands share a `tokio::Semaphore` sized by the `bulk_concurrency` setting (default 4). `log_action` writes every destructive op to `action_log` with pre/post HEAD and stderr excerpt. Every handler wraps its sync work in `spawn_blocking`. |
 | `commands/scan.rs` | Directory-scan import. `scan_folder` lists direct children that look like git working trees and annotates each with `{alreadyAdded, ignored}` by consulting `repos` + `ignored_paths`. `add_scanned_repos` bulk-inserts with the same canonical/is_git_repo/dedup guards as `add_repo`. `ignore_path` / `unignore_path` / `list_ignored_paths` manage the suppression list. |
-| `commands/system.rs` | OS integration: `open_folder` (explorer), `open_terminal` (launcher chain), `open_remote` / `open_commit` (opener plugin, http/https-only), `set_tray_tooltip`. |
+| `commands/system.rs` | OS integration. Each command has platform-specific branches via `#[cfg(windows)]` / `#[cfg(target_os = "macos")]` / `#[cfg(target_os = "linux")]`. `open_folder` → explorer / Finder (`open`) / `xdg-open`. `open_terminal` → per-OS launcher chain (wt/git-bash/cmd · Terminal/iTerm2 · gnome-terminal/konsole/alacritty/kitty/xterm). `open_remote` / `open_commit` use the opener plugin (http/https-only guard) — portable. `set_tray_tooltip`. |
 | `commands/settings.rs` | Free-form key/value settings. Frontend defines the shape; backend just persists strings. Keys are allowlisted server-side (`ALLOWED_KEYS`). |
-| `util.rs` | `normalize_path` — Windows-aware normalization used anywhere a repo path is compared or stored. Drives dedup correctness. Pure; unit-tested. |
+| `util.rs` | `normalize_path` — platform-aware normalization (separate `#[cfg(windows)]` and `#[cfg(not(windows))]` bodies) used anywhere a repo path is compared or stored. Drives dedup correctness. Pure; unit-tested on both platforms. |
 | `git/runner.rs` | **The single `Command::new("git")`.** All other files go through `run_git` (errors on non-zero exit) or `run_git_raw` (returns output + code for callers that need to inspect exit code). `run_git_traced` is a diagnostics-only variant that sets `GIT_TRACE=1 GIT_TRACE_CURL=1 GIT_TRACE_SETUP=1 GCM_INTERACTIVE=Never`. Uses `CREATE_NO_WINDOW` on Windows to prevent a console flash for each subprocess. |
 | `git/status.rs` | `current_branch`, `default_branch` (origin/HEAD → main → master → HEAD), `ahead_behind` via `rev-list --left-right --count HEAD...@{upstream}`, `dirty_from_porcelain` (Dirty enum) + `dirty_breakdown` (per-category counts for the force-pull preview), `current_head_sha`, `rev_count_between`, `has_submodules` (exists-check on `.gitmodules`), `ref_short_sha`. |
 | `git/log.rs` | `git log` with a unit-separator (\u001F) + record-separator (\u001E) custom format to safely split commit fields that may contain whitespace or newlines. `parse_log` is pure and unit-tested. `commits_since(base_ref, limit)` powers the force-pull preview's "N unpushed commits" list. |
@@ -247,18 +247,24 @@ CREATE INDEX idx_repos_priority ON repos(priority);
 ```
 
 **Path normalization note.** `repos.path` and `ignored_paths.path` are
-always stored normalized (uppercase drive letter, forward slashes → back,
-trailing separators stripped, UNC `\\server\share` prefix preserved). See
-`src-tauri/src/util.rs`. The SQLite UNIQUE on `repos.path` is
-case-sensitive, so dedup relies on normalize-both-sides comparison in
-`find_repo_by_normalized_path` rather than the SQL constraint alone —
-this catches rows inserted before the normalization pass (if any).
+always stored normalized. The rules differ per platform (see
+`src-tauri/src/util.rs`):
+- **Windows**: uppercase drive letter, forward slashes → back, trailing
+  separators stripped, UNC `\\server\share` prefix preserved.
+- **Unix (mac/linux)**: double-slash runs collapsed, trailing `/`
+  stripped, case preserved.
+
+The SQLite UNIQUE on `repos.path` is case-sensitive, so dedup relies on
+normalize-both-sides comparison in `find_repo_by_normalized_path` rather
+than the SQL constraint alone — this catches rows inserted before the
+normalization pass (if any). A DB created on one platform is not
+portable to another; the stored path shapes differ.
 
 ### Settings keys
 
 | Key | Values | Default |
 |---|---|---|
-| `terminal` | `auto` \| `wt` \| `git-bash` \| `cmd` | `auto` |
+| `terminal` | `auto` plus one of: `wt` \| `git-bash` \| `cmd` (Windows) · `terminal` \| `iterm2` (macOS) · `gnome-terminal` \| `konsole` \| `alacritty` \| `kitty` \| `xterm` (Linux) | `auto` |
 | `refresh_interval_sec` | positive integer (clamped ≥30 in UI) | `300` |
 | `default_repos_dir` | absolute path string | `""` (unset) |
 | `theme` | `dark` \| `light` \| `system` | `dark` |

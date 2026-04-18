@@ -136,14 +136,21 @@ Tailwind and dnd-kit inject inline styles. If a future XSS ever lands,
 CSP restricts the blast radius: no remote script fetches, no external
 exfiltration endpoints.
 
-### UNC / network-path rejection (M3 mitigation)
+### UNC / network-path rejection (M3 mitigation, Windows only)
 
-`commands/repos.rs::canonical` rejects paths that begin with `\\` or `//`
-before they reach the filesystem or git. A user who really needs a
-network-hosted repo must mount it to a drive letter first — this forces
-the attack surface through the OS's credential prompting and share-ACL
-path rather than through silent SMB lookups triggered by `git -C
-\\server\share status` running on the refresh timer.
+Under `#[cfg(windows)]`, `commands/repos.rs::canonical` rejects paths that
+begin with `\\` or `//` before they reach the filesystem or git. A user
+who really needs a network-hosted repo must mount it to a drive letter
+first — this forces the attack surface through the OS's credential
+prompting and share-ACL path rather than through silent SMB lookups
+triggered by `git -C \\server\share status` running on the refresh
+timer.
+
+On mac/linux the check is a no-op: `/` is the normal filesystem root,
+and network mounts (`/Volumes/...`, `/mnt/...`, autofs) surface as local
+paths indistinguishable from internal disks. The analogous attack
+requires the user to have already mounted an attacker-controlled share,
+which we don't try to detect here.
 
 ### cmd.exe path filter (M2 mitigation)
 
