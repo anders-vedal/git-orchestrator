@@ -196,6 +196,10 @@ pub struct NewActionLog<'a> {
     pub stderr_excerpt: Option<&'a str>,
     pub started_at: &'a str,
     pub duration_ms: i64,
+    /// Shared identifier for the N rows that make up a multi-repo
+    /// logical action (e.g. "switch 5 repos to feat/auth"). `None` for
+    /// single-repo actions.
+    pub group_id: Option<&'a str>,
 }
 
 pub fn insert_action_log(
@@ -205,8 +209,8 @@ pub fn insert_action_log(
     conn.execute(
         "INSERT INTO action_log
             (repo_id, action, pre_head_sha, post_head_sha, exit_code,
-             stderr_excerpt, started_at, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             stderr_excerpt, started_at, duration_ms, group_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             entry.repo_id,
             entry.action,
@@ -216,6 +220,7 @@ pub fn insert_action_log(
             entry.stderr_excerpt,
             entry.started_at,
             entry.duration_ms,
+            entry.group_id,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -228,7 +233,7 @@ pub fn recent_actions_for_repo(
 ) -> Result<Vec<ActionLogEntry>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT id, repo_id, action, pre_head_sha, post_head_sha, exit_code,
-                stderr_excerpt, started_at, duration_ms
+                stderr_excerpt, started_at, duration_ms, group_id
          FROM action_log
          WHERE repo_id = ?1
          ORDER BY id DESC
@@ -245,6 +250,43 @@ pub fn recent_actions_for_repo(
             stderr_excerpt: row.get(6)?,
             started_at: row.get(7)?,
             duration_ms: row.get(8)?,
+            group_id: row.get(9)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/// Fetch every action_log row with the given group_id, in insertion
+/// order. Empty Vec if the group doesn't exist. Used by Phase 2 workspace
+/// ops to present a multi-repo action's per-repo outcomes together, and
+/// (eventually) to unwind a failed bulk operation.
+pub fn actions_in_group(
+    conn: &Connection,
+    group_id: &str,
+) -> Result<Vec<ActionLogEntry>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, repo_id, action, pre_head_sha, post_head_sha, exit_code,
+                stderr_excerpt, started_at, duration_ms, group_id
+         FROM action_log
+         WHERE group_id = ?1
+         ORDER BY id ASC",
+    )?;
+    let rows = stmt.query_map(params![group_id], |row| {
+        Ok(ActionLogEntry {
+            id: row.get(0)?,
+            repo_id: row.get(1)?,
+            action: row.get(2)?,
+            pre_head_sha: row.get(3)?,
+            post_head_sha: row.get(4)?,
+            exit_code: row.get(5)?,
+            stderr_excerpt: row.get(6)?,
+            started_at: row.get(7)?,
+            duration_ms: row.get(8)?,
+            group_id: row.get(9)?,
         })
     })?;
     let mut out = Vec::new();
@@ -262,7 +304,7 @@ pub fn last_undoable_action(
 ) -> Result<Option<ActionLogEntry>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT id, repo_id, action, pre_head_sha, post_head_sha, exit_code,
-                stderr_excerpt, started_at, duration_ms
+                stderr_excerpt, started_at, duration_ms, group_id
          FROM action_log
          WHERE repo_id = ?1
            AND action IN ('force_pull')
@@ -282,6 +324,7 @@ pub fn last_undoable_action(
             stderr_excerpt: row.get(6)?,
             started_at: row.get(7)?,
             duration_ms: row.get(8)?,
+            group_id: row.get(9)?,
         })
     })?;
     match rows.next() {

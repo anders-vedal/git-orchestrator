@@ -206,6 +206,11 @@ pub struct ActionLogEntry {
     pub started_at: String,
     #[serde(rename = "durationMs")]
     pub duration_ms: i64,
+    /// Shared identifier tying together the rows of a single multi-repo
+    /// logical action (Phase 2 workspace/snapshot ops). `None` for
+    /// single-repo actions.
+    #[serde(rename = "groupId")]
+    pub group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

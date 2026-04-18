@@ -121,6 +121,9 @@ export interface ActionLogEntry {
   stderrExcerpt: string | null;
   startedAt: string;
   durationMs: number;
+  /** Shared identifier tying multi-repo action rows together (Phase 2+).
+   *  null for single-repo actions like force_pull or commit_push. */
+  groupId: string | null;
 }
 
 export interface IgnoredPath {

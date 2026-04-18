@@ -204,6 +204,59 @@ fn log_action(
     started_at: &str,
     duration_ms: i64,
 ) {
+    log_action_inner(
+        repo_id,
+        action,
+        pre_head_sha,
+        post_head_sha,
+        exit_code,
+        stderr_excerpt,
+        started_at,
+        duration_ms,
+        None,
+    );
+}
+
+/// Log one leg of a multi-repo action, tagging every row with the same
+/// `group_id` so Phase 2 workspace/snapshot ops can reconstruct the full
+/// group. Callers generate the group_id once per logical operation via
+/// `new_action_group_id()` and thread it through their per-repo loop.
+#[allow(dead_code)]
+pub fn log_action_in_group(
+    repo_id: i64,
+    action: &str,
+    pre_head_sha: Option<&str>,
+    post_head_sha: Option<&str>,
+    exit_code: i32,
+    stderr_excerpt: Option<&str>,
+    started_at: &str,
+    duration_ms: i64,
+    group_id: &str,
+) {
+    log_action_inner(
+        repo_id,
+        action,
+        pre_head_sha,
+        post_head_sha,
+        exit_code,
+        stderr_excerpt,
+        started_at,
+        duration_ms,
+        Some(group_id),
+    );
+}
+
+fn log_action_inner(
+    repo_id: i64,
+    action: &str,
+    pre_head_sha: Option<&str>,
+    post_head_sha: Option<&str>,
+    exit_code: i32,
+    stderr_excerpt: Option<&str>,
+    started_at: &str,
+    duration_ms: i64,
+    group_id: Option<&str>,
+) {
     let entry = NewActionLog {
         repo_id,
         action,
@@ -213,10 +266,23 @@ fn log_action(
         stderr_excerpt,
         started_at,
         duration_ms,
+        group_id,
     };
     if let Err(e) = db::with_conn(|c| db::queries::insert_action_log(c, &entry)) {
         eprintln!("[repo-dashboard] action_log insert failed: {e}");
     }
+}
+
+/// Generate a fresh identifier to tie together the rows of one multi-repo
+/// action. Not cryptographic — uniqueness within a single app run is
+/// sufficient. Phase 2 callers: generate once before the per-repo loop,
+/// pass the same string to every `log_action_in_group` call.
+#[allow(dead_code)]
+pub fn new_action_group_id() -> String {
+    let nanos = chrono::Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis() * 1_000_000);
+    format!("grp_{nanos}")
 }
 
 /// Restore the most recent undoable action for this repo. Refuses if the
