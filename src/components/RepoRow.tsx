@@ -247,9 +247,30 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
                 {status.name}
               </button>
             )}
-            <Pill tone="neutral" icon={<GitBranch size={12} />} title="Current branch">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!status.branch) return;
+                openDialog({
+                  kind: "branchPicker",
+                  repoId: status.id,
+                  repoName: status.name,
+                  currentBranch: status.branch,
+                  defaultBranch: status.defaultBranch,
+                });
+              }}
+              disabled={!status.branch}
+              title={
+                status.branch
+                  ? "Switch branch — click to open the branch picker"
+                  : "No branch — repo may be unborn or detached"
+              }
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-3 px-2 py-0.5 text-xs font-medium text-zinc-300 hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <GitBranch size={12} />
               <span className="font-mono">{status.branch || "—"}</span>
-            </Pill>
+            </button>
             {status.branch &&
               status.defaultBranch &&
               status.branch !== status.defaultBranch && (

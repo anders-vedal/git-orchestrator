@@ -227,6 +227,52 @@ pub struct IgnoredPath {
     pub added_at: String,
 }
 
+/// One branch row returned by `git_list_branches`. Locals carry an
+/// optional upstream (e.g. "origin/main"); remotes leave it None.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchInfo {
+    pub name: String,
+    #[serde(rename = "shortSha")]
+    pub short_sha: String,
+    /// True for refs/remotes/* entries.
+    #[serde(rename = "isRemote")]
+    pub is_remote: bool,
+    /// Marks the local branch HEAD currently points at.
+    #[serde(rename = "isCurrent")]
+    pub is_current: bool,
+    /// Short-form upstream tracking ref (local branches only).
+    pub upstream: Option<String>,
+    /// ISO8601 last commit date, for sorting / display.
+    #[serde(rename = "lastCommitAt")]
+    pub last_commit_at: Option<String>,
+}
+
+/// Full result of a branch list call: locals, remotes, and the current
+/// branch name (None when HEAD is detached or unborn).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchList {
+    pub current: Option<String>,
+    pub local: Vec<BranchInfo>,
+    pub remote: Vec<BranchInfo>,
+}
+
+/// Outcome of `git_checkout` / `git_create_branch`. Carries pre/post HEAD
+/// so the action_log entry's Undo hook can roll back to `previous_head_sha`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckoutResult {
+    #[serde(rename = "previousBranch")]
+    pub previous_branch: Option<String>,
+    #[serde(rename = "previousHeadSha")]
+    pub previous_head_sha: Option<String>,
+    #[serde(rename = "newBranch")]
+    pub new_branch: String,
+    #[serde(rename = "newHeadSha")]
+    pub new_head_sha: Option<String>,
+    /// Merged stdout+stderr from git — surfaces edge cases like
+    /// "Switched to a new branch" vs "Already on '<branch>'".
+    pub message: String,
+}
+
 /// One commit from the cross-repo activity feed. Flattens `Commit` +
 /// the owning repo's id/name so the frontend can render a unified list
 /// without a second lookup. Produced by `get_activity_feed`.

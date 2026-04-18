@@ -17,6 +17,13 @@ type DialogKind =
     }
   | { kind: "settings" }
   | { kind: "activityFeed" }
+  | {
+      kind: "branchPicker";
+      repoId: number;
+      repoName: string;
+      currentBranch: string;
+      defaultBranch: string;
+    }
   | { kind: "bulkFetchResult"; title: string; results: BulkResult[] }
   | { kind: "bulkPullResult"; title: string; report: BulkPullReport }
   | { kind: "gitError"; title: string; error: string; repoId?: number }

@@ -4,6 +4,7 @@ import type { RepoStatus } from "./types";
 import { EVENT_REPO_STATUS_UPDATED } from "./lib/tauri";
 import { ActivityFeedDialog } from "./components/dialogs/ActivityFeedDialog";
 import { AddRepoDialog } from "./components/dialogs/AddRepoDialog";
+import { BranchPickerDialog } from "./components/dialogs/BranchPickerDialog";
 import { BulkResultDialog } from "./components/dialogs/BulkResultDialog";
 import { CommitPushDialog } from "./components/dialogs/CommitPushDialog";
 import { ForcePullDialog } from "./components/dialogs/ForcePullDialog";
@@ -128,6 +129,7 @@ function App() {
       <GitErrorDialog />
       <SettingsDialog />
       <ActivityFeedDialog />
+      <BranchPickerDialog />
       <InfoDialog />
     </div>
   );

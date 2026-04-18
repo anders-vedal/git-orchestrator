@@ -153,6 +153,29 @@ export interface ScanAddResult {
   skipped: ScanSkip[];
 }
 
+export interface BranchInfo {
+  name: string;
+  shortSha: string;
+  isRemote: boolean;
+  isCurrent: boolean;
+  upstream: string | null;
+  lastCommitAt: string | null;
+}
+
+export interface BranchList {
+  current: string | null;
+  local: BranchInfo[];
+  remote: BranchInfo[];
+}
+
+export interface CheckoutResult {
+  previousBranch: string | null;
+  previousHeadSha: string | null;
+  newBranch: string;
+  newHeadSha: string | null;
+  message: string;
+}
+
 /**
  * One entry in the cross-repo activity feed. Backend flattens `Commit`
  * into the repo context so the frontend can render a unified list

@@ -8,9 +8,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ActionLogEntry,
   ActivityEntry,
+  BranchList,
   BulkPullReport,
   BulkResult,
   ChangedFiles,
+  CheckoutResult,
   Commit,
   CommitPushResult,
   ConfigureHelperResult,
@@ -149,6 +151,33 @@ export function getSetting(key: string): Promise<string | null> {
 }
 export function setSetting(key: string, value: string): Promise<void> {
   return invoke("set_setting", { key, value });
+}
+
+// ---- branch ----
+/** List local + remote branches for a repo, with SHAs, upstreams, and
+ *  last-commit timestamps. No network; reads refs from .git/ only. */
+export function gitListBranches(id: number): Promise<BranchList> {
+  return invoke("git_list_branches", { id });
+}
+/** Switch to an existing local branch. Fails fast with git's own
+ *  "your local changes would be overwritten" message when applicable.
+ *  Logged to action_log under action='checkout' for Phase 2.4 undo. */
+export function gitCheckout(id: number, name: string): Promise<CheckoutResult> {
+  return invoke("git_checkout", { id, name });
+}
+/** Create a new local branch and switch to it. `startPoint` accepts any
+ *  revision git understands (branch name, origin/<name>, SHA, tag);
+ *  null branches from HEAD. */
+export function gitCreateBranch(
+  id: number,
+  name: string,
+  startPoint?: string | null,
+): Promise<CheckoutResult> {
+  return invoke("git_create_branch", {
+    id,
+    name,
+    startPoint: startPoint ?? null,
+  });
 }
 
 // ---- activity ----

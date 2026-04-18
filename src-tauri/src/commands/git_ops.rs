@@ -48,7 +48,7 @@ fn merge_stdout_stderr(out: &runner::GitOutput) -> String {
     s
 }
 
-async fn load_repo(id: i64) -> Result<crate::models::Repo, String> {
+pub async fn load_repo(id: i64) -> Result<crate::models::Repo, String> {
     db::with_conn(|c| crate::db::queries::find_repo(c, id))
 }
 
@@ -194,7 +194,7 @@ pub async fn git_force_pull(id: i64) -> Result<ForcePullResult, String> {
     .map_err(|e| e.to_string())?
 }
 
-fn log_action(
+pub fn log_action(
     repo_id: i64,
     action: &str,
     pre_head_sha: Option<&str>,
