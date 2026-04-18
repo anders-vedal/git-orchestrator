@@ -22,6 +22,24 @@ pub fn list_repos(conn: &Connection) -> Result<Vec<Repo>, rusqlite::Error> {
     Ok(out)
 }
 
+/// Bulk ops pass `None` for "every repo" or `Some(ids)` for "only these".
+/// For the dashboard's scale (typically <100 repos) doing a full
+/// `list_repos` + in-memory filter is fine and avoids dynamic IN-clause
+/// SQL. Preserves the `list_repos` sort order.
+pub fn list_repos_filtered(
+    conn: &Connection,
+    ids: Option<&[i64]>,
+) -> Result<Vec<Repo>, rusqlite::Error> {
+    let all = list_repos(conn)?;
+    match ids {
+        None => Ok(all),
+        Some(ids) => {
+            let set: std::collections::HashSet<i64> = ids.iter().copied().collect();
+            Ok(all.into_iter().filter(|r| set.contains(&r.id)).collect())
+        }
+    }
+}
+
 pub fn find_repo(conn: &Connection, id: i64) -> Result<Repo, rusqlite::Error> {
     conn.query_row(
         "SELECT id, name, path, priority, added_at FROM repos WHERE id = ?1",

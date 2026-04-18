@@ -85,11 +85,20 @@ export function gitCommitPush(
 ): Promise<CommitPushResult> {
   return invoke("git_commit_push", { id, message, push });
 }
-export function gitFetchAll(): Promise<BulkResult[]> {
-  return invoke("git_fetch_all");
+/**
+ * Bulk fetch. `ids` undefined = every repo; otherwise restrict to the
+ * supplied set. Returns one BulkResult per repo actually attempted.
+ */
+export function gitFetchAll(ids?: number[]): Promise<BulkResult[]> {
+  return invoke("git_fetch_all", { ids: ids ?? null });
 }
-export function gitPullAllSafe(): Promise<BulkPullReport> {
-  return invoke("git_pull_all_safe");
+/**
+ * Bulk safe pull. Same `ids` semantics as gitFetchAll. The backend
+ * filters AND applies per-repo safety gates (default branch, clean tree);
+ * a selected repo that fails a gate lands in `report.skipped`.
+ */
+export function gitPullAllSafe(ids?: number[]): Promise<BulkPullReport> {
+  return invoke("git_pull_all_safe", { ids: ids ?? null });
 }
 export function undoLastAction(id: number): Promise<ForcePullResult> {
   return invoke("undo_last_action", { id });

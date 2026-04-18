@@ -22,6 +22,7 @@ import {
 import { useState } from "react";
 import { firstLine, timeAgo, truncate } from "../lib/format";
 import { useReposStore } from "../stores/reposStore";
+import { useSelectionStore } from "../stores/selectionStore";
 import { useUiStore } from "../stores/uiStore";
 import type { Dirty, RepoStatus } from "../types";
 import { RepoActions } from "./RepoActions";
@@ -33,6 +34,9 @@ import { Pill } from "./ui/Pill";
 interface Props {
   status: RepoStatus;
   dragDisabled?: boolean;
+  /** Ordered ids of the currently-visible rows — needed for shift+click
+   *  range selection. Pass from RepoList's memoized `visible`. */
+  visibleIds: number[];
 }
 
 const DIRTY_TOOLTIPS: Record<Dirty, string> = {
@@ -83,14 +87,29 @@ function dirtyPill(dirty: Dirty) {
   }
 }
 
-export function RepoRow({ status, dragDisabled = false }: Props) {
+export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
   const isExpanded = useUiStore((s) => s.expandedIds.has(status.id));
   const openDialog = useUiStore((s) => s.openDialog);
   const refreshOne = useReposStore((s) => s.refreshOne);
   const renameRepo = useReposStore((s) => s.rename);
   const refreshing = useReposStore((s) => s.refreshingIds.has(status.id));
+  const isSelected = useSelectionStore((s) => s.selectedIds.has(status.id));
+  const toggleSelect = useSelectionStore((s) => s.toggle);
+  const selectRange = useSelectionStore((s) => s.selectRange);
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(status.name);
+
+  function handleCheckboxClick(e: React.MouseEvent<HTMLInputElement>) {
+    // stopPropagation prevents the row click from also firing and
+    // collapsing/expanding the row (which it doesn't today, but guards
+    // future UX changes).
+    e.stopPropagation();
+    if (e.shiftKey) {
+      selectRange(status.id, visibleIds);
+    } else {
+      toggleSelect(status.id);
+    }
+  }
 
   const {
     attributes,
@@ -169,10 +188,20 @@ export function RepoRow({ status, dragDisabled = false }: Props) {
       style={style}
       className={clsx(
         "border-b border-border bg-surface-1",
+        isSelected && "bg-blue-500/[0.06] border-l-2 border-l-blue-400 pl-0",
         isDragging && "repo-row--dragging",
       )}
     >
       <div className="flex items-start gap-3 px-3 py-3">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => {}}
+          onClick={handleCheckboxClick}
+          className="mt-2 h-3.5 w-3.5 cursor-pointer rounded border-border bg-surface-2 accent-blue-500"
+          title="Select this repo for bulk actions (shift+click to range-select, Esc to clear)"
+          aria-label={`Select ${status.name}`}
+        />
         <button
           className={clsx(
             "mt-1.5 rounded p-1 text-zinc-500 hover:text-zinc-300",
@@ -182,7 +211,7 @@ export function RepoRow({ status, dragDisabled = false }: Props) {
           )}
           title={
             dragDisabled
-              ? "Reorder is disabled while a filter, search, or sort is active — reset to rearrange"
+              ? "Reorder is disabled while a filter, search, sort, or multi-selection is active"
               : "Drag to reorder"
           }
           disabled={dragDisabled}

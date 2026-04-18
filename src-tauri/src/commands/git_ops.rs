@@ -774,9 +774,13 @@ pub async fn force_pull_preview(id: i64) -> Result<ForcePullPreview, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Fetch repos in parallel. When `ids` is `None`, operates on every repo;
+/// when `Some`, restricts to the supplied set (used by selection-based
+/// bulk actions). Empty `Some(vec![])` is a no-op.
 #[tauri::command]
-pub async fn git_fetch_all() -> Result<Vec<BulkResult>, String> {
-    let repos = db::with_conn(|c| crate::db::queries::list_repos(c))?;
+pub async fn git_fetch_all(ids: Option<Vec<i64>>) -> Result<Vec<BulkResult>, String> {
+    let repos =
+        db::with_conn(|c| crate::db::queries::list_repos_filtered(c, ids.as_deref()))?;
     let sem = Arc::new(Semaphore::new(bulk_concurrency()));
 
     let mut handles = Vec::with_capacity(repos.len());
@@ -840,9 +844,11 @@ fn bulk_concurrency() -> usize {
 }
 
 /// Pull every repo that is on its default branch AND clean. Skip anything else.
+/// Same `ids` semantics as `git_fetch_all` — `None` = all, `Some` = filter.
 #[tauri::command]
-pub async fn git_pull_all_safe() -> Result<BulkPullReport, String> {
-    let repos = db::with_conn(|c| crate::db::queries::list_repos(c))?;
+pub async fn git_pull_all_safe(ids: Option<Vec<i64>>) -> Result<BulkPullReport, String> {
+    let repos =
+        db::with_conn(|c| crate::db::queries::list_repos_filtered(c, ids.as_deref()))?;
     let sem = Arc::new(Semaphore::new(bulk_concurrency()));
 
     let mut handles = Vec::with_capacity(repos.len());

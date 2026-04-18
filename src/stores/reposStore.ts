@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import * as api from "../lib/tauri";
+import { useSelectionStore } from "./selectionStore";
 import type { Repo, RepoStatus, ScanAddResult } from "../types";
 
 function skeletonStatus(repo: Repo): RepoStatus {
@@ -90,6 +91,9 @@ export const useReposStore = create<ReposState>((set, get) => ({
         refreshing: skeletons.length > 0,
         refreshingIds: ids,
       });
+      // Drop any selection entries that point at repos no longer on disk
+      // (removed in another session, etc.).
+      useSelectionStore.getState().pruneTo(ids);
       if (skeletons.length > 0) {
         await api.refreshAllStatuses();
         window.setTimeout(() => {
@@ -163,6 +167,10 @@ export const useReposStore = create<ReposState>((set, get) => ({
     set((state) => ({
       statuses: state.statuses.filter((s) => s.id !== id),
     }));
+    // Drop the removed id from the selection so bulk ops don't target it.
+    useSelectionStore
+      .getState()
+      .pruneTo(get().statuses.map((s) => s.id));
   },
 
   async rename(id: number, newName: string) {
