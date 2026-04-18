@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import type { RepoStatus } from "./types";
 import { EVENT_REPO_STATUS_UPDATED } from "./lib/tauri";
+import { ActivityFeedDialog } from "./components/dialogs/ActivityFeedDialog";
 import { AddRepoDialog } from "./components/dialogs/AddRepoDialog";
 import { BulkResultDialog } from "./components/dialogs/BulkResultDialog";
 import { CommitPushDialog } from "./components/dialogs/CommitPushDialog";
@@ -126,6 +127,7 @@ function App() {
       <BulkResultDialog />
       <GitErrorDialog />
       <SettingsDialog />
+      <ActivityFeedDialog />
       <InfoDialog />
     </div>
   );

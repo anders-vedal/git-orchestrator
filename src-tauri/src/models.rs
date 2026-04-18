@@ -222,6 +222,23 @@ pub struct IgnoredPath {
     pub added_at: String,
 }
 
+/// One commit from the cross-repo activity feed. Flattens `Commit` +
+/// the owning repo's id/name so the frontend can render a unified list
+/// without a second lookup. Produced by `get_activity_feed`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityEntry {
+    #[serde(rename = "repoId")]
+    pub repo_id: i64,
+    #[serde(rename = "repoName")]
+    pub repo_name: String,
+    pub sha: String,
+    #[serde(rename = "shaShort")]
+    pub sha_short: String,
+    pub author: String,
+    pub timestamp: String,
+    pub message: String,
+}
+
 /// One candidate surfaced by `scan_folder`. `path` is already normalized.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanEntry {

@@ -60,6 +60,36 @@ pub fn commits_since(
     parse_log(&out.stdout)
 }
 
+/// Commits on HEAD authored in the last `days_back` days, up to `limit`.
+/// Used by the cross-repo activity feed — one call per repo, merged and
+/// time-sorted on the frontend side. HEAD-only on purpose: "what's on
+/// my main branch" is the useful default for a multi-repo overview;
+/// other-branch activity can layer on later via a UI filter.
+pub fn activity_since(
+    repo_path: &Path,
+    days_back: u32,
+    limit: u32,
+) -> Result<Vec<Commit>, GitError> {
+    let format = format!("%H{SEP}%h{SEP}%an{SEP}%aI{SEP}%s{REC}");
+    let n = format!("-n{limit}");
+    // `--since` accepts "N.days" / "N.days.ago" / absolute dates. We use
+    // the fractional days form so a value of 0 still returns today's
+    // commits (git treats "0.days" as "from right now going backward" —
+    // which matches the caller's intent when they clamp to at least 1).
+    let since = format!("--since={days_back}.days.ago");
+    let out = run_git(
+        repo_path,
+        &[
+            "log",
+            &n,
+            &since,
+            &format!("--pretty=format:{format}"),
+            "HEAD",
+        ],
+    )?;
+    parse_log(&out.stdout)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

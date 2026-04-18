@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActionLogEntry,
+  ActivityEntry,
   BulkPullReport,
   BulkResult,
   ChangedFiles,
@@ -148,6 +149,23 @@ export function getSetting(key: string): Promise<string | null> {
 }
 export function setSetting(key: string, value: string): Promise<void> {
   return invoke("set_setting", { key, value });
+}
+
+// ---- activity ----
+/**
+ * Cross-repo activity feed: commits on HEAD across every registered repo,
+ * authored in the last `days` days, up to `limitPerRepo` per repo,
+ * merged and time-sorted newest-first. One git log call per repo, fanned
+ * out in parallel. HEAD-only — feature-branch activity isn't included.
+ */
+export function getActivityFeed(
+  days: number,
+  limitPerRepo?: number,
+): Promise<ActivityEntry[]> {
+  return invoke("get_activity_feed", {
+    days,
+    limitPerRepo: limitPerRepo ?? null,
+  });
 }
 
 // ---- scan / ignore ----

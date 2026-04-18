@@ -150,6 +150,21 @@ export interface ScanAddResult {
   skipped: ScanSkip[];
 }
 
+/**
+ * One entry in the cross-repo activity feed. Backend flattens `Commit`
+ * into the repo context so the frontend can render a unified list
+ * without extra lookups.
+ */
+export interface ActivityEntry {
+  repoId: number;
+  repoName: string;
+  sha: string;
+  shaShort: string;
+  author: string;
+  timestamp: string;
+  message: string;
+}
+
 export type TerminalPref =
   | "auto"
   // Windows

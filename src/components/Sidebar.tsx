@@ -1,4 +1,5 @@
 import {
+  Activity,
   CheckSquare,
   DownloadCloud,
   FolderPlus,
@@ -206,6 +207,14 @@ export function Sidebar() {
           disabled={refreshing}
         >
           Refresh all
+        </Button>
+        <Button
+          icon={<Activity size={14} />}
+          title="Cross-repo activity feed — recent commits across every registered repo, merged and time-sorted. Useful for 'what happened this week' across a suite of services."
+          onClick={() => openDialog({ kind: "activityFeed" })}
+          disabled={statuses.length === 0}
+        >
+          Activity feed
         </Button>
       </div>
 
