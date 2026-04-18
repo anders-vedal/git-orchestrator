@@ -7,6 +7,14 @@ type DialogKind =
   | { kind: "scanFolder" }
   | { kind: "removeRepo"; id: number; name: string; path: string }
   | { kind: "forcePull"; id: number; name: string; defaultBranch: string }
+  | {
+      kind: "commitPush";
+      id: number;
+      name: string;
+      branch: string;
+      defaultBranch: string;
+      hasUpstream: boolean;
+    }
   | { kind: "settings" }
   | { kind: "bulkFetchResult"; title: string; results: BulkResult[] }
   | { kind: "bulkPullResult"; title: string; report: BulkPullReport }

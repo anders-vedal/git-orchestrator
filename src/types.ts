@@ -67,6 +67,19 @@ export interface ForcePullResult {
   message: string;
 }
 
+export interface CommitPushResult {
+  branch: string;
+  stagedFiles: number;
+  committed: boolean;
+  commitSha: string | null;
+  commitShort: string | null;
+  commitMessage: string;
+  pushAttempted: boolean;
+  pushed: boolean;
+  upstreamSet: boolean;
+  pushOutput: string;
+}
+
 export interface DirtyBreakdown {
   staged: number;
   unstaged: number;

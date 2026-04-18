@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { AddRepoDialog } from "./components/dialogs/AddRepoDialog";
 import { BulkResultDialog } from "./components/dialogs/BulkResultDialog";
+import { CommitPushDialog } from "./components/dialogs/CommitPushDialog";
 import { ForcePullDialog } from "./components/dialogs/ForcePullDialog";
 import { GitErrorDialog } from "./components/dialogs/GitErrorDialog";
 import { InfoDialog } from "./components/dialogs/InfoDialog";
@@ -103,6 +104,7 @@ function App() {
       <ScanFolderDialog />
       <RemoveRepoDialog />
       <ForcePullDialog />
+      <CommitPushDialog />
       <BulkResultDialog />
       <GitErrorDialog />
       <SettingsDialog />

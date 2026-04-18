@@ -141,6 +141,30 @@ pub struct ForcePullPreview {
     pub remote_head_short: Option<String>,
 }
 
+/// Outcome of the opt-in commit-and-push flow. Commit and push are
+/// reported independently so a successful commit isn't hidden by a
+/// push failure (credentials, non-fast-forward, offline).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitPushResult {
+    pub branch: String,
+    #[serde(rename = "stagedFiles")]
+    pub staged_files: u32,
+    pub committed: bool,
+    #[serde(rename = "commitSha")]
+    pub commit_sha: Option<String>,
+    #[serde(rename = "commitShort")]
+    pub commit_short: Option<String>,
+    #[serde(rename = "commitMessage")]
+    pub commit_message: String,
+    #[serde(rename = "pushAttempted")]
+    pub push_attempted: bool,
+    pub pushed: bool,
+    #[serde(rename = "upstreamSet")]
+    pub upstream_set: bool,
+    #[serde(rename = "pushOutput")]
+    pub push_output: String,
+}
+
 /// Result of a force-pull, with the info needed to render a reflog-rescue
 /// hint and wire up the session-level "Undo" button.
 #[derive(Debug, Clone, Serialize, Deserialize)]

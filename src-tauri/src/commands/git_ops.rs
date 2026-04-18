@@ -2,8 +2,8 @@ use crate::db;
 use crate::db::queries::NewActionLog;
 use crate::git::{log, runner, status};
 use crate::models::{
-    ActionLogEntry, BulkPullReport, BulkReason, BulkResult, ConfigureHelperResult, Dirty,
-    DirtyBreakdown, ForcePullPreview, ForcePullResult, GitSetupStatus, SignInResult,
+    ActionLogEntry, BulkPullReport, BulkReason, BulkResult, CommitPushResult, ConfigureHelperResult,
+    Dirty, DirtyBreakdown, ForcePullPreview, ForcePullResult, GitSetupStatus, SignInResult,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -293,6 +293,183 @@ pub async fn undo_last_action(id: i64) -> Result<ForcePullResult, String> {
             discarded_count: 0,
             message: summary,
         })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Stage every change (`git add -A`), commit with the supplied message, and
+/// optionally push to the current branch's upstream. The three phases are
+/// reported independently so a successful commit isn't hidden when the push
+/// fails (e.g. non-fast-forward, missing credentials, offline).
+///
+/// Guards:
+/// - Refuses on a detached HEAD — can't commit to nowhere.
+/// - Refuses when there's nothing to stage — avoids empty commits.
+/// - Push uses plain `git push` (never `--force`); on a branch with no
+///   configured upstream, we add `-u origin <branch>` so the first push
+///   also sets the upstream, which is what the user expects.
+/// - Pre- and post-HEAD SHAs are written to `action_log` so a future
+///   "undo commit" feature can restore via `git reset --soft` without
+///   data loss.
+#[tauri::command]
+pub async fn git_commit_push(
+    id: i64,
+    message: String,
+    push: bool,
+) -> Result<CommitPushResult, String> {
+    let trimmed = message.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("commit message is required".to_string());
+    }
+
+    let repo = load_repo(id).await?;
+    let path = repo.path.clone();
+    let repo_id = repo.id;
+
+    tokio::task::spawn_blocking(move || -> Result<CommitPushResult, String> {
+        let p = Path::new(&path);
+
+        let branch = status::current_branch(p).map_err(|e| e.to_string())?;
+        if branch == "HEAD" || branch.is_empty() {
+            return Err(
+                "refuse to commit: HEAD is detached. Check out a branch first.".to_string(),
+            );
+        }
+
+        let pre_head = status::current_head_sha(p).map_err(|e| e.to_string())?;
+        let started_at = now_iso();
+        let t0 = Instant::now();
+
+        // 1. Stage everything.
+        let add = runner::run_git_raw(p, &["add", "-A"]).map_err(|e| e.to_string())?;
+        if add.code != 0 {
+            let msg = merge_stdout_stderr(&add);
+            log_action(
+                repo_id,
+                "commit_push",
+                pre_head.as_deref(),
+                None,
+                add.code,
+                Some(&msg),
+                &started_at,
+                t0.elapsed().as_millis() as i64,
+            );
+            return Err(msg);
+        }
+
+        // 2. Confirm something is staged — avoids empty commits.
+        let diff = runner::run_git_raw(p, &["diff", "--cached", "--quiet"])
+            .map_err(|e| e.to_string())?;
+        if diff.code == 0 {
+            return Err(
+                "nothing to commit — working tree is clean after staging.".to_string(),
+            );
+        }
+
+        let staged_files = {
+            let out = runner::run_git_raw(p, &["diff", "--cached", "--name-only", "-z"])
+                .map_err(|e| e.to_string())?;
+            if out.code == 0 {
+                out.stdout
+                    .split('\0')
+                    .filter(|s| !s.is_empty())
+                    .count() as u32
+            } else {
+                0
+            }
+        };
+
+        // 3. Commit.
+        let commit = runner::run_git_raw(p, &["commit", "-m", &trimmed])
+            .map_err(|e| e.to_string())?;
+        if commit.code != 0 {
+            let msg = merge_stdout_stderr(&commit);
+            log_action(
+                repo_id,
+                "commit_push",
+                pre_head.as_deref(),
+                None,
+                commit.code,
+                Some(&msg),
+                &started_at,
+                t0.elapsed().as_millis() as i64,
+            );
+            return Err(msg);
+        }
+
+        let post_head = status::current_head_sha(p).map_err(|e| e.to_string())?;
+
+        let mut result = CommitPushResult {
+            branch: branch.clone(),
+            staged_files,
+            committed: true,
+            commit_sha: post_head.clone(),
+            commit_short: post_head.as_deref().map(short_sha),
+            commit_message: trimmed.clone(),
+            push_attempted: false,
+            pushed: false,
+            upstream_set: false,
+            push_output: String::new(),
+        };
+
+        // 4. Push (opt-in). We only surface the outcome — a failure here
+        //    leaves the commit intact locally, which is what the user wants.
+        if push {
+            result.push_attempted = true;
+
+            // Check if the branch already has an upstream configured.
+            let up = runner::run_git_raw(
+                p,
+                &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            )
+            .map_err(|e| e.to_string())?;
+            let has_upstream = up.code == 0 && !up.stdout.trim().is_empty();
+
+            let push_out = if has_upstream {
+                runner::run_git_raw(p, &["push"]).map_err(|e| e.to_string())?
+            } else {
+                result.upstream_set = true;
+                runner::run_git_raw(p, &["push", "-u", "origin", &branch])
+                    .map_err(|e| e.to_string())?
+            };
+
+            result.push_output = merge_stdout_stderr(&push_out);
+            result.pushed = push_out.code == 0;
+        }
+
+        let summary = if result.pushed {
+            format!(
+                "Committed {} · Pushed to {}{}",
+                result.commit_short.clone().unwrap_or_default(),
+                if result.upstream_set { "new upstream origin/" } else { "origin/" },
+                branch,
+            )
+        } else if result.push_attempted {
+            format!(
+                "Committed {} · Push failed: {}",
+                result.commit_short.clone().unwrap_or_default(),
+                result.push_output
+            )
+        } else {
+            format!(
+                "Committed {} (no push requested)",
+                result.commit_short.clone().unwrap_or_default()
+            )
+        };
+
+        log_action(
+            repo_id,
+            "commit_push",
+            pre_head.as_deref(),
+            post_head.as_deref(),
+            0,
+            excerpt(&summary).as_deref(),
+            &started_at,
+            t0.elapsed().as_millis() as i64,
+        );
+
+        Ok(result)
     })
     .await
     .map_err(|e| e.to_string())?

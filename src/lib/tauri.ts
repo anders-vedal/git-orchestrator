@@ -11,6 +11,7 @@ import type {
   BulkResult,
   ChangedFiles,
   Commit,
+  CommitPushResult,
   ConfigureHelperResult,
   ForcePullPreview,
   ForcePullResult,
@@ -66,6 +67,13 @@ export function gitPullFf(id: number): Promise<string> {
 }
 export function gitForcePull(id: number): Promise<ForcePullResult> {
   return invoke("git_force_pull", { id });
+}
+export function gitCommitPush(
+  id: number,
+  message: string,
+  push: boolean,
+): Promise<CommitPushResult> {
+  return invoke("git_commit_push", { id, message, push });
 }
 export function gitFetchAll(): Promise<BulkResult[]> {
   return invoke("git_fetch_all");

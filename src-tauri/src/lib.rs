@@ -39,6 +39,7 @@ pub fn run() {
             git_ops::git_fetch,
             git_ops::git_pull_ff,
             git_ops::git_force_pull,
+            git_ops::git_commit_push,
             git_ops::git_fetch_all,
             git_ops::git_pull_all_safe,
             git_ops::undo_last_action,

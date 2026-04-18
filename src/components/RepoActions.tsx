@@ -7,6 +7,7 @@ import {
   Globe,
   ChevronDown,
   ChevronUp,
+  GitCommitHorizontal,
   Loader2,
 } from "lucide-react";
 import { useState } from "react";
@@ -28,6 +29,7 @@ export function RepoActions({ status }: Props) {
   const isExpanded = useUiStore((s) => s.expandedIds.has(status.id));
 
   const onDefault = status.branch === status.defaultBranch;
+  const hasChanges = status.dirty !== "clean";
 
   async function run(
     name: string,
@@ -88,6 +90,28 @@ export function RepoActions({ status }: Props) {
         ) : (
           <ArrowDownToLine size={16} />
         )}
+      </IconButton>
+
+      <IconButton
+        title={
+          hasChanges
+            ? "Commit & push — stages every change (`git add -A`), commits with a message you provide, and optionally pushes to origin. Opens a dialog with a full file preview and the exact commands before anything runs. Never uses --force."
+            : "Commit & push disabled — working tree is clean. Nothing to stage."
+        }
+        tone="primary"
+        disabled={!hasChanges || !!busy}
+        onClick={() =>
+          openDialog({
+            kind: "commitPush",
+            id: status.id,
+            name: status.name,
+            branch: status.branch,
+            defaultBranch: status.defaultBranch,
+            hasUpstream: status.hasUpstream,
+          })
+        }
+      >
+        <GitCommitHorizontal size={16} />
       </IconButton>
 
       <IconButton

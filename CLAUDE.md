@@ -173,9 +173,24 @@ conflict.
     never bare `--force`.** The auto-refresh loop silently fetches in the
     background, which invalidates naive `--force-with-lease` safety
     (microsoft/vscode#144635). `--force-if-includes` (Git 2.30+) closes
-    that race. The app does not push today, so this invariant is
-    forward-looking — but we bake it in now so the first implementation
-    is safe. See `docs/safety-model.md` §"Future destructive ops".
+    that race. The current `git_commit_push` never force-pushes (see #17),
+    so this invariant applies to any future force-push feature we add.
+    See `docs/safety-model.md` §"Future destructive ops".
+
+17. **Commit & push is opt-in, single-button, bare-push-only.** The
+    `git_commit_push` command stages with `git add -A`, commits with a
+    required user-supplied message, then — only if the user ticks the
+    push checkbox — runs either `git push` (upstream exists) or
+    `git push -u origin <branch>` (setting upstream on first push).
+    Never `--force`, never `--force-with-lease`. A commit with a failed
+    push returns `committed: true, pushed: false` and surfaces the push
+    error separately — the commit is NOT rolled back, since it's
+    recoverable via `git reset --soft HEAD~1`. Pre- and post-HEAD are
+    written to `action_log` under action `commit_push` so a future
+    "undo commit" feature can reuse the same infrastructure as force-pull
+    undo. The frontend gates this behind `CommitPushDialog`, which shows
+    a full file preview and the exact commands that will run before the
+    user clicks — do not bypass that disclosure step.
 
 ## Code layout
 
@@ -190,8 +205,8 @@ src-tauri/src/
 ├── util.rs              # normalize_path — shared between repos::add_repo and scan (dedup correctness)
 ├── commands/            # One file per domain. Register new cmds in lib.rs.
 │   ├── repos.rs         # list/add/remove/rename/reorder + canonical() path guard
-│   ├── status.rs        # get_repo_status, get_all_statuses, get_repo_log
-│   ├── git_ops.rs       # fetch, pull_ff, force_pull (+ preview, undo, action log, diagnose_auth), bulk fetch/pull with concurrency semaphore
+│   ├── status.rs        # get_repo_status, get_all_statuses, get_repo_log, get_changed_files
+│   ├── git_ops.rs       # fetch, pull_ff, force_pull (+ preview, undo, action log, diagnose_auth), commit_push, bulk fetch/pull with concurrency semaphore
 │   ├── scan.rs          # scan_folder, add_scanned_repos, list/ignore/unignore paths
 │   ├── system.rs        # open folder/terminal/remote/commit, set_tray_tooltip
 │   └── settings.rs      # get_setting / set_setting (server-side key allowlist)
@@ -222,9 +237,10 @@ src/
     ├── Sidebar.tsx      # Add repo / Scan folder buttons, bulk actions, auto-refresh indicator, settings
     ├── RepoList.tsx     # dnd-kit SortableContext + empty state
     ├── RepoRow.tsx      # Header pills, latest commit, inline rename, RepoActions, expandable log
-    ├── RepoActions.tsx  # Fetch / Pull / Force pull / Open folder/terminal/remote / expand log
+    ├── RepoActions.tsx  # Fetch / Pull / Commit & push / Force pull / Open folder/terminal/remote / expand log
     ├── RepoLogPanel.tsx # Last 10 commits, clickable SHAs open remote
-    ├── dialogs/         # AddRepo, ScanFolder, RemoveRepo, ForcePull (preview + undo), BulkResult, GitError, Settings, Info
+    ├── RepoChangesPanel.tsx # Working-tree file list (status code + path), shown in expanded row when dirty
+    ├── dialogs/         # AddRepo, ScanFolder, RemoveRepo, ForcePull (preview + undo), CommitPush, BulkResult, GitError, Settings, Info
     ├── errors/          # GitErrorPanel — reusable classified-error renderer with Diagnose button
     └── ui/              # Button, IconButton, Pill, Dialog primitives
 ```
@@ -260,9 +276,13 @@ src/
 
 ## Non-goals (reject scope creep)
 
-Not a git GUI (no staging/committing/merging), not a CI/CD dashboard, not
+Not a full git GUI (no hunk-level staging, no interactive rebase, no
+merge/cherry-pick UI, no branch creation), not a CI/CD dashboard, not
 cross-device sync, not multi-user, not a replacement for Cadency/DevPulse.
-If a request reaches into these areas, ask before building.
+A minimal "stage-all + commit + optional push" flow exists (see invariant
+#17) — that's the full commit surface, anything finer-grained belongs in
+a real git GUI or the terminal. If a request reaches into these areas,
+ask before building.
 
 ## V2-deferred features
 
@@ -280,6 +300,12 @@ point-in-time document; this is the current state):
 - Directory-scan import — `commands/scan.rs`, backed by an `ignored_paths`
   table so removed repos don't come back on re-scan. See invariants #13 and
   #14 above.
+- Commit & push (opt-in, single-button) — `git_commit_push` command +
+  `CommitPushDialog`. Stages all changes, commits with a required message,
+  optionally pushes (never `--force`). Logged to `action_log` under action
+  `commit_push`. See invariant #17.
+- Working-tree file preview — `get_changed_files` command + `RepoChangesPanel`.
+  Shown in the expanded row when dirty, capped at 100 files.
 
 ## Further reading
 
