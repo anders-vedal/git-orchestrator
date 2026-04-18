@@ -61,7 +61,11 @@ export function RepoActions({ status }: Props) {
   return (
     <div className="flex items-center gap-1">
       <IconButton
-        title="Fetch"
+        title={
+          "Fetch — runs `git fetch origin`. Downloads new commits and updates " +
+          "remote refs (origin/*) so ahead/behind counts are current. Does NOT " +
+          "touch your working tree or move the current branch."
+        }
         onClick={() => run("Fetch", () => api.gitFetch(status.id))}
         disabled={!!busy}
       >
@@ -69,7 +73,12 @@ export function RepoActions({ status }: Props) {
       </IconButton>
 
       <IconButton
-        title="Pull (ff-only)"
+        title={
+          "Pull (fast-forward only) — runs `git pull --ff-only`. Fast-forwards " +
+          "the current branch to its upstream if possible. Refuses when the " +
+          "branch has diverged or the working tree is dirty; no merge commit is " +
+          "ever created."
+        }
         tone="primary"
         onClick={() => run("Pull", () => api.gitPullFf(status.id))}
         disabled={!!busy}
@@ -84,8 +93,12 @@ export function RepoActions({ status }: Props) {
       <IconButton
         title={
           onDefault
-            ? "Force pull — reset hard to origin/default"
-            : `Force pull disabled — not on default branch (${status.defaultBranch})`
+            ? "Force pull — fetches origin and runs `git reset --hard origin/" +
+              status.defaultBranch +
+              "`. DISCARDS any local commits and uncommitted changes on the " +
+              "current branch. A preview dialog shows exactly what will be lost " +
+              "before you confirm, and the pre-reset SHA is logged so you can Undo."
+            : `Force pull disabled — only allowed on the default branch (${status.defaultBranch}). Switch branches in your terminal first.`
         }
         tone="danger"
         disabled={!onDefault || !!busy}
@@ -104,7 +117,7 @@ export function RepoActions({ status }: Props) {
       <div className="mx-1 h-5 w-px bg-border" />
 
       <IconButton
-        title="Open folder"
+        title="Open folder in the OS file manager"
         onClick={() =>
           run("Open folder", () => api.openFolder(status.id), {
             refresh: false,
@@ -116,7 +129,7 @@ export function RepoActions({ status }: Props) {
       </IconButton>
 
       <IconButton
-        title="Open terminal"
+        title="Open a terminal in this repo — use it to commit, push, merge, or run any other git command"
         onClick={() =>
           run("Open terminal", () => api.openTerminal(status.id), {
             refresh: false,
@@ -128,7 +141,11 @@ export function RepoActions({ status }: Props) {
       </IconButton>
 
       <IconButton
-        title={status.remoteUrl ? `Open ${status.remoteUrl}` : "No remote URL"}
+        title={
+          status.remoteUrl
+            ? `Open remote in browser — ${status.remoteUrl}`
+            : "No remote URL — this repo has no origin remote configured"
+        }
         disabled={!status.remoteUrl}
         onClick={() =>
           run("Open remote", () => api.openRemote(status.id), {
@@ -143,7 +160,11 @@ export function RepoActions({ status }: Props) {
       <div className="mx-1 h-5 w-px bg-border" />
 
       <IconButton
-        title={isExpanded ? "Hide log" : "Show last 10 commits"}
+        title={
+          isExpanded
+            ? "Hide details panel"
+            : "Show details — changed files in the working tree and the last 10 commits on HEAD"
+        }
         onClick={() => toggleExpanded(status.id)}
       >
         {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}

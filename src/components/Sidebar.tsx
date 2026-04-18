@@ -86,12 +86,14 @@ export function Sidebar() {
       <Button
         variant="primary"
         icon={<FolderPlus size={14} />}
+        title="Add a single existing local git repository by picking its folder"
         onClick={() => openDialog({ kind: "addRepo" })}
       >
         Add repo
       </Button>
       <Button
         icon={<FolderSearch size={14} />}
+        title="Scan a parent folder for git repos — lists every direct child that's a git repository so you can bulk-add them"
         onClick={() => openDialog({ kind: "scanFolder" })}
         className="mt-1.5"
       >
@@ -110,6 +112,7 @@ export function Sidebar() {
               <DownloadCloud size={14} />
             )
           }
+          title="Run `git fetch origin` on every repo in parallel. Downloads new commits and updates remote refs — does not modify any working tree."
           onClick={runFetchAll}
           disabled={bulkInProgress || statuses.length === 0}
         >
@@ -123,6 +126,7 @@ export function Sidebar() {
               <GitPullRequestArrow size={14} />
             )
           }
+          title="Fast-forward pull every repo that's eligible — must be on its default branch, clean working tree, behind upstream, and not diverged. Skips everything else; nothing destructive."
           onClick={runPullSafe}
           disabled={bulkInProgress || statuses.length === 0}
         >
@@ -136,6 +140,7 @@ export function Sidebar() {
               <RefreshCcw size={14} />
             )
           }
+          title="Re-read status from disk for every repo. No network calls — just recomputes branch, dirty state, and ahead/behind from the local .git."
           onClick={() => refreshAll()}
           disabled={refreshing}
         >
@@ -156,7 +161,11 @@ export function Sidebar() {
             </span>
           )}
         </div>
-        <Button icon={<SettingsIcon size={14} />} onClick={() => openDialog({ kind: "settings" })}>
+        <Button
+          icon={<SettingsIcon size={14} />}
+          title="App settings — terminal launcher, auto-refresh interval, default repo directory, theme, and ignored-paths list"
+          onClick={() => openDialog({ kind: "settings" })}
+        >
           Settings
         </Button>
       </div>

@@ -1,6 +1,6 @@
 use crate::db;
 use crate::git::{log, remote, status};
-use crate::models::{Commit, Dirty, Repo, RepoStatus};
+use crate::models::{ChangedFiles, Commit, Dirty, Repo, RepoStatus};
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
@@ -120,4 +120,11 @@ pub async fn get_all_statuses() -> Result<Vec<RepoStatus>, String> {
 pub async fn get_repo_log(id: i64, count: u32) -> Result<Vec<Commit>, String> {
     let repo = db::with_conn(|c| crate::db::queries::find_repo(c, id))?;
     log::log(Path::new(&repo.path), count).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_changed_files(id: i64, limit: Option<u32>) -> Result<ChangedFiles, String> {
+    let repo = db::with_conn(|c| crate::db::queries::find_repo(c, id))?;
+    let lim = limit.unwrap_or(100);
+    status::changed_files(Path::new(&repo.path), lim).map_err(|e| e.to_string())
 }

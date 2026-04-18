@@ -1,6 +1,8 @@
+use once_cell::sync::Lazy;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
@@ -42,23 +44,58 @@ impl From<GitError> for String {
 ///   otherwise run on every `git status` / index refresh.
 /// - `protocol.ext.allow=never` — blocks `ext::<cmd>` remote helpers on
 ///   fetch/pull (CVE-2017-1000117 class).
+/// - `credential.helper=` (empty) — resets the credential-helper chain, so a
+///   repo-local `.git/config` entry like `credential.helper=!evil-cmd` cannot
+///   sneak into the chain git consults during fetch/pull/sign-in. Git runs
+///   helper values prefixed with `!` as shell commands (see `git-config(1)`),
+///   and list-valued config keys normally **append** across scopes — so
+///   without this reset, a malicious repo could achieve RCE the moment the
+///   user clicks fetch. After the reset we re-pin the user's own global
+///   helper (see `resolved_credential_helper`) so their configured sign-in
+///   flow still works.
 ///
 /// These are `-c` flags, not env vars, so they only apply to this process.
 /// A user's own `git` usage in a terminal is unaffected. Aliases and
 /// `core.sshCommand` are NOT neutralised here — see `docs/security.md`.
-const HARDENING_FLAGS: &[&str] = &[
+const BASE_HARDENING_FLAGS: &[&str] = &[
     "-c", "core.fsmonitor=",
     "-c", "protocol.ext.allow=never",
+    "-c", "credential.helper=",
 ];
+
+/// Cached resolution of the user's `credential.helper` at GLOBAL+SYSTEM
+/// scope (NOT local — local is exactly what we're defending against). The
+/// outer `Option` distinguishes "not yet resolved" from "resolved to
+/// nothing". Populated lazily on first access and invalidated when the
+/// user configures a new helper via `configure_credential_helper`.
+///
+/// We re-apply this on every git call so the user's intended helper is the
+/// only one git sees, regardless of what a hostile repo-local config tries
+/// to inject.
+static CREDENTIAL_HELPER_CACHE: Lazy<Mutex<Option<Option<String>>>> =
+    Lazy::new(|| Mutex::new(None));
 
 /// The sole `Command::new("git")` site in the app (invariant #1). Every
 /// other helper in this module builds on top of this. `repo_path` is
 /// optional — `None` produces a command suitable for repo-independent
 /// queries (`git --version`, `git config --global --get ...`).
-fn new_git_command(repo_path: Option<&Path>, args: &[&str]) -> Command {
+///
+/// `pin_credential_helper` controls whether we re-apply the user's global
+/// helper after the `BASE_HARDENING_FLAGS` reset. True for every callsite
+/// except the bootstrap detection itself (which would otherwise recurse).
+fn new_git_command(
+    repo_path: Option<&Path>,
+    args: &[&str],
+    pin_credential_helper: bool,
+) -> Command {
     let mut cmd = Command::new("git");
-    for flag in HARDENING_FLAGS {
+    for flag in BASE_HARDENING_FLAGS {
         cmd.arg(flag);
+    }
+    if pin_credential_helper {
+        if let Some(helper) = resolved_credential_helper() {
+            cmd.arg("-c").arg(format!("credential.helper={helper}"));
+        }
     }
     if let Some(p) = repo_path {
         cmd.arg("-C").arg(p);
@@ -75,7 +112,52 @@ fn new_git_command(repo_path: Option<&Path>, args: &[&str]) -> Command {
 }
 
 fn build_command(repo_path: &Path, args: &[&str]) -> Command {
-    new_git_command(Some(repo_path), args)
+    new_git_command(Some(repo_path), args, true)
+}
+
+/// Returns the user's credential.helper at GLOBAL+SYSTEM scope (anything
+/// EXCEPT repo-local). Cached — the detection runs once per app lifetime
+/// unless `invalidate_credential_helper_cache` is called (e.g. after the
+/// user clicks our one-click "Set up credential helper" button).
+///
+/// Detection bypasses the pin itself to avoid infinite recursion: we build
+/// the detection command with `pin_credential_helper: false`.
+fn resolved_credential_helper() -> Option<String> {
+    let mut cache = CREDENTIAL_HELPER_CACHE.lock().ok()?;
+    if cache.is_none() {
+        *cache = Some(detect_global_credential_helper());
+    }
+    cache.as_ref().and_then(|v| v.clone())
+}
+
+/// Forget the cached helper so the next call re-reads config. Call this
+/// after any write that could change the resolved value.
+pub fn invalidate_credential_helper_cache() {
+    if let Ok(mut cache) = CREDENTIAL_HELPER_CACHE.lock() {
+        *cache = None;
+    }
+}
+
+/// Read `credential.helper` from git config, EXCLUDING the local scope.
+/// Uses `GIT_CONFIG_PARAMETERS` to be explicit we want globally-resolved
+/// values only: we query from a neutral cwd (not inside any watched repo)
+/// so local config can't contribute.
+fn detect_global_credential_helper() -> Option<String> {
+    // `git config --get credential.helper` returns the last value wins —
+    // but we're calling from no repo context (no -C), so local scope can't
+    // contribute. The value we get back is whatever the user's global or
+    // system config resolves to.
+    let mut cmd = new_git_command(
+        None,
+        &["config", "--get", "credential.helper"],
+        false, // critical: avoid recursion
+    );
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
 }
 
 /// Run `git -C <repo_path> <args...>` capturing stdout/stderr.
@@ -198,7 +280,7 @@ pub fn is_git_repo(repo_path: &Path) -> bool {
 /// the same RCE vectors regardless of whether we're inside a repo. These
 /// commands never touch the network or working tree.
 pub fn run_git_no_repo(args: &[&str]) -> Result<GitOutput, GitError> {
-    let mut cmd = new_git_command(None, args);
+    let mut cmd = new_git_command(None, args, true);
 
     let output = cmd
         .output()

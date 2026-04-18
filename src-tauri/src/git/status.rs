@@ -1,5 +1,5 @@
 use super::runner::{run_git, run_git_raw, GitError};
-use crate::models::{Dirty, DirtyBreakdown};
+use crate::models::{ChangedFile, ChangedFiles, Dirty, DirtyBreakdown};
 use std::path::Path;
 
 pub fn current_branch(repo_path: &Path) -> Result<String, GitError> {
@@ -209,6 +209,46 @@ pub fn dirty_breakdown(repo_path: &Path) -> Result<DirtyBreakdown, GitError> {
 /// filesystem check — no git subprocess.
 pub fn has_submodules(repo_path: &Path) -> bool {
     repo_path.join(".gitmodules").exists()
+}
+
+/// List changed files from porcelain output, capped at `limit`. Always
+/// walks the full output so `total` is accurate even when truncated.
+pub fn changed_files(repo_path: &Path, limit: u32) -> Result<ChangedFiles, GitError> {
+    let out = run_git(repo_path, &["status", "--porcelain=v1", "-z"])?;
+    let mut files: Vec<ChangedFile> = Vec::new();
+    let mut total: u32 = 0;
+
+    let mut iter = out.stdout.split('\0').peekable();
+    while let Some(record) = iter.next() {
+        if record.is_empty() || record.len() < 3 {
+            continue;
+        }
+        let bytes = record.as_bytes();
+        let x = bytes[0] as char;
+        let y = bytes[1] as char;
+        // Format: "XY<space>path" — byte 2 is the separator space.
+        let path = String::from_utf8_lossy(&bytes[3..]).to_string();
+        let orig = if x == 'R' || x == 'C' {
+            iter.next().map(|s| s.to_string())
+        } else {
+            None
+        };
+        total += 1;
+        if files.len() < limit as usize {
+            files.push(ChangedFile {
+                path,
+                orig_path: orig,
+                x: x.to_string(),
+                y: y.to_string(),
+            });
+        }
+    }
+
+    Ok(ChangedFiles {
+        truncated: total as usize > files.len(),
+        total,
+        files,
+    })
 }
 
 /// Short SHA of a remote ref (e.g. `origin/main`). Returns None if it

@@ -73,6 +73,19 @@ export interface DirtyBreakdown {
   untracked: number;
 }
 
+export interface ChangedFile {
+  path: string;
+  origPath?: string;
+  x: string;
+  y: string;
+}
+
+export interface ChangedFiles {
+  files: ChangedFile[];
+  total: number;
+  truncated: boolean;
+}
+
 export interface ForcePullPreview {
   currentBranch: string;
   defaultBranch: string;
@@ -168,4 +181,9 @@ export interface GitSetupStatus {
   userNameSet: boolean;
   userEmailSet: boolean;
   credentialHelperSet: boolean;
+}
+
+export interface ConfigureHelperResult {
+  helper: string;
+  message: string;
 }

@@ -25,6 +25,7 @@ import { useReposStore } from "../stores/reposStore";
 import { useUiStore } from "../stores/uiStore";
 import type { Dirty, RepoStatus } from "../types";
 import { RepoActions } from "./RepoActions";
+import { RepoChangesPanel } from "./RepoChangesPanel";
 import { RepoLogPanel } from "./RepoLogPanel";
 import { IconButton } from "./ui/Button";
 import { Pill } from "./ui/Pill";
@@ -34,35 +35,48 @@ interface Props {
   dragDisabled?: boolean;
 }
 
+const DIRTY_TOOLTIPS: Record<Dirty, string> = {
+  clean: "Working tree matches HEAD — no local changes.",
+  untracked:
+    "New files exist that git isn't tracking yet. They won't be pushed until `git add` + commit.",
+  unstaged:
+    "Tracked files have edits that haven't been added to the index. Run `git add` to stage them, or discard with `git restore`.",
+  staged:
+    "Changes are in the index, ready to commit. Run `git commit` to record them.",
+  mixed:
+    "A combination of staged, unstaged, and/or untracked changes — typically because some edits were staged and others came in after.",
+};
+
 function dirtyPill(dirty: Dirty) {
+  const tip = DIRTY_TOOLTIPS[dirty];
   switch (dirty) {
     case "clean":
       return (
-        <Pill tone="green" icon={<CheckCircle2 size={12} />}>
+        <Pill tone="green" icon={<CheckCircle2 size={12} />} title={tip}>
           clean
         </Pill>
       );
     case "untracked":
       return (
-        <Pill tone="yellow" icon={<FilePlus size={12} />}>
+        <Pill tone="yellow" icon={<FilePlus size={12} />} title={tip}>
           untracked
         </Pill>
       );
     case "unstaged":
       return (
-        <Pill tone="yellow" icon={<FileEdit size={12} />}>
+        <Pill tone="yellow" icon={<FileEdit size={12} />} title={tip}>
           unstaged
         </Pill>
       );
     case "staged":
       return (
-        <Pill tone="blue" icon={<FileEdit size={12} />}>
+        <Pill tone="blue" icon={<FileEdit size={12} />} title={tip}>
           staged
         </Pill>
       );
     case "mixed":
       return (
-        <Pill tone="red" icon={<FileWarning size={12} />}>
+        <Pill tone="red" icon={<FileWarning size={12} />} title={tip}>
           mixed
         </Pill>
       );
@@ -269,7 +283,7 @@ export function RepoRow({ status, dragDisabled = false }: Props) {
           <RepoActions status={status} />
           <div className="flex items-center gap-1">
             <IconButton
-              title="Refresh status"
+              title="Refresh status — re-reads branch, dirty state, and ahead/behind from disk. No network."
               onClick={() => refreshOne(status.id)}
               disabled={refreshing}
             >
@@ -280,13 +294,13 @@ export function RepoRow({ status, dragDisabled = false }: Props) {
               )}
             </IconButton>
             <IconButton
-              title="Rename"
+              title="Rename in the dashboard — changes the display name only; the folder on disk is not renamed"
               onClick={() => setIsEditingName(true)}
             >
               <Pencil size={14} />
             </IconButton>
             <IconButton
-              title="Remove from dashboard"
+              title="Remove from dashboard — unregisters this repo. Your files on disk are NOT deleted."
               tone="danger"
               onClick={() =>
                 openDialog({
@@ -303,7 +317,12 @@ export function RepoRow({ status, dragDisabled = false }: Props) {
         </div>
       </div>
 
-      {isExpanded && <RepoLogPanel status={status} />}
+      {isExpanded && (
+        <>
+          {status.dirty !== "clean" && <RepoChangesPanel status={status} />}
+          <RepoLogPanel status={status} />
+        </>
+      )}
     </div>
   );
 }

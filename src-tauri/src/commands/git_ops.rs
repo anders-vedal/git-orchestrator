@@ -2,8 +2,8 @@ use crate::db;
 use crate::db::queries::NewActionLog;
 use crate::git::{log, runner, status};
 use crate::models::{
-    ActionLogEntry, BulkPullReport, BulkReason, BulkResult, Dirty, DirtyBreakdown,
-    ForcePullPreview, ForcePullResult, GitSetupStatus, SignInResult,
+    ActionLogEntry, BulkPullReport, BulkReason, BulkResult, ConfigureHelperResult, Dirty,
+    DirtyBreakdown, ForcePullPreview, ForcePullResult, GitSetupStatus, SignInResult,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -408,6 +408,122 @@ pub async fn git_setup_status() -> Result<GitSetupStatus, String> {
             user_name_set,
             user_email_set,
             credential_helper_set,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// One-click fix for the "no credential helper configured" banner. Writes
+/// `credential.helper = <name>` to the user's global git config, picking
+/// the best-available helper in this order:
+///
+///   1. `manager`  — Git Credential Manager, if `git credential-manager
+///      --version` succeeds. Modern, browser-based OAuth for all major
+///      hosts, stores tokens in Windows Credential Manager (DPAPI) /
+///      macOS Keychain / libsecret. This is the preferred option on every
+///      platform when available.
+///   2. Platform fallback — `wincred` on Windows (built into Git for
+///      Windows, uses Windows Credential Manager), `osxkeychain` on macOS
+///      (built into Git for Mac, uses Keychain). Both keep credentials in
+///      the OS-level encrypted store.
+///   3. Linux without GCM — return an error so the UI can tell the user to
+///      install GCM. We refuse to set `store` (plaintext) or `cache`
+///      (15-minute in-memory; doesn't solve the "signing in" use case).
+///
+/// Security posture:
+/// - The helper name written is HARDCODED and chosen by the backend. The
+///   frontend passes no arguments whatsoever — a compromised renderer
+///   cannot substitute an attacker-controlled helper (e.g. a shell command
+///   via `!foo`). See `git-config(1)` "credential.helper" — Git runs the
+///   value as a shell command when it starts with `!`.
+/// - The write is scoped to `--global`, not `--system`. It lands in
+///   `~/.gitconfig` and is trivially reversible with
+///   `git config --global --unset credential.helper`.
+/// - No credentials are read, written, or logged here. This is purely a
+///   config-file edit.
+#[tauri::command]
+pub async fn configure_credential_helper() -> Result<ConfigureHelperResult, String> {
+    tokio::task::spawn_blocking(|| -> Result<ConfigureHelperResult, String> {
+        // Probe for modern GCM first — it's what we recommend everywhere.
+        let gcm_available = matches!(
+            runner::run_git_no_repo(&["credential-manager", "--version"]),
+            Ok(o) if o.code == 0
+        );
+
+        let helper: &'static str = if gcm_available {
+            "manager"
+        } else {
+            #[cfg(windows)]
+            { "wincred" }
+            #[cfg(target_os = "macos")]
+            { "osxkeychain" }
+            #[cfg(all(not(windows), not(target_os = "macos")))]
+            {
+                return Err(
+                    "Git Credential Manager isn't installed. Install it from \
+                     https://github.com/git-ecosystem/git-credential-manager \
+                     and click \"Check again\"."
+                        .to_string(),
+                );
+            }
+        };
+
+        // Invariant: `helper` is one of { "manager", "wincred", "osxkeychain" }
+        // — all hardcoded literals above. If this assertion fires, someone
+        // added a new branch without updating the allowlist.
+        debug_assert!(
+            matches!(helper, "manager" | "wincred" | "osxkeychain"),
+            "helper name must be hardcoded, got {helper}"
+        );
+
+        let out = runner::run_git_no_repo(&[
+            "config",
+            "--global",
+            "credential.helper",
+            helper,
+        ])
+        .map_err(|e| e.to_string())?;
+
+        if out.code != 0 {
+            let stderr = out.stderr.trim();
+            return Err(if stderr.is_empty() {
+                format!("git config failed with exit code {}", out.code)
+            } else {
+                stderr.to_string()
+            });
+        }
+
+        // The resolved helper just changed — drop the cached value so the
+        // next git invocation re-reads config and the new helper gets
+        // re-pinned on every subsequent call.
+        runner::invalidate_credential_helper_cache();
+
+        let message = match helper {
+            "manager" => {
+                "Git Credential Manager is now configured. It will prompt you to sign in \
+                 the next time you fetch or pull — credentials are stored by your \
+                 operating system, never by this app."
+                    .to_string()
+            }
+            "wincred" => {
+                "Using the built-in Windows Credential Manager. Your credentials will be \
+                 stored in Windows' encrypted credential store. For OAuth-based sign-in \
+                 with GitHub/GitLab/Azure, install Git Credential Manager and click \
+                 \"Check again\"."
+                    .to_string()
+            }
+            "osxkeychain" => {
+                "Using the built-in macOS Keychain. Your credentials will be stored in \
+                 the system Keychain."
+                    .to_string()
+            }
+            _ => unreachable!("helper name is not in the hardcoded allowlist"),
+        };
+
+        Ok(ConfigureHelperResult {
+            helper: helper.to_string(),
+            message,
         })
     })
     .await

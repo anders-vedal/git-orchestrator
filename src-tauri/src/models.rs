@@ -100,6 +100,28 @@ pub struct DirtyBreakdown {
     pub untracked: u32,
 }
 
+/// One entry from `git status --porcelain=v1 -z`. `x` and `y` are the
+/// two status chars exactly as git emits them — the frontend maps them
+/// to display labels. For rename/copy entries, `orig_path` is the source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangedFile {
+    pub path: String,
+    #[serde(rename = "origPath", skip_serializing_if = "Option::is_none")]
+    pub orig_path: Option<String>,
+    pub x: String,
+    pub y: String,
+}
+
+/// Bounded result from `get_changed_files`. `files` is capped at the limit
+/// the caller passed in; `total` is the true count so the frontend can
+/// render "+ N more" when truncated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangedFiles {
+    pub files: Vec<ChangedFile>,
+    pub total: u32,
+    pub truncated: bool,
+}
+
 /// What the user sees BEFORE confirming a force-pull. Summarizes exactly
 /// what will be discarded, fast-forwarded, and preserved.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,4 +247,13 @@ pub struct GitSetupStatus {
     pub user_email_set: bool,
     #[serde(rename = "credentialHelperSet")]
     pub credential_helper_set: bool,
+}
+
+/// Outcome of the one-click "Set up credential helper" button. `helper` is
+/// the value that landed in the user's global git config — always one of
+/// the hardcoded allowlisted names (never a value the renderer supplied).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigureHelperResult {
+    pub helper: String,
+    pub message: String,
 }

@@ -6,8 +6,10 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
+import { useMemo } from "react";
 import { useReposStore } from "../stores/reposStore";
 import {
+  countByFilter,
   isFilterActive,
   useFilterStore,
   type SortKey,
@@ -26,10 +28,6 @@ const FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "outOfSync", label: "Out of sync" },
   { value: "clean", label: "In sync & clean" },
   { value: "dirty", label: "Any uncommitted" },
-  { value: "untracked", label: "Untracked only" },
-  { value: "unstaged", label: "Unstaged only" },
-  { value: "staged", label: "Staged only" },
-  { value: "mixed", label: "Mixed" },
   { value: "errors", label: "Has error" },
 ];
 
@@ -42,7 +40,8 @@ const selectCls =
   "focus:border-blue-400 focus:outline-none hover:bg-surface-3";
 
 export function RepoToolbar({ visibleCount }: Props) {
-  const totalCount = useReposStore((s) => s.statuses.length);
+  const statuses = useReposStore((s) => s.statuses);
+  const totalCount = statuses.length;
   const search = useFilterStore((s) => s.search);
   const setSearch = useFilterStore((s) => s.setSearch);
   const sortBy = useFilterStore((s) => s.sortBy);
@@ -55,6 +54,14 @@ export function RepoToolbar({ visibleCount }: Props) {
 
   const active = isFilterActive(search, sortBy, filter);
   const dirDisabled = sortBy === "custom";
+
+  const filterCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        FILTER_OPTIONS.map((o) => [o.value, countByFilter(statuses, o.value)]),
+      ) as Record<StatusFilter, number>,
+    [statuses],
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-0 px-3 py-2">
@@ -93,7 +100,7 @@ export function RepoToolbar({ visibleCount }: Props) {
         >
           {FILTER_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
-              {o.label}
+              {o.label} ({filterCounts[o.value]})
             </option>
           ))}
         </select>

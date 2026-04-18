@@ -9,7 +9,9 @@ import type {
   ActionLogEntry,
   BulkPullReport,
   BulkResult,
+  ChangedFiles,
   Commit,
+  ConfigureHelperResult,
   ForcePullPreview,
   ForcePullResult,
   GitSetupStatus,
@@ -48,6 +50,12 @@ export function getAllStatuses(): Promise<RepoStatus[]> {
 export function getRepoLog(id: number, count: number): Promise<Commit[]> {
   return invoke("get_repo_log", { id, count });
 }
+export function getChangedFiles(
+  id: number,
+  limit?: number,
+): Promise<ChangedFiles> {
+  return invoke("get_changed_files", { id, limit: limit ?? null });
+}
 
 // ---- git ops ----
 export function gitFetch(id: number): Promise<string> {
@@ -85,6 +93,9 @@ export function signInRemote(id: number): Promise<SignInResult> {
 }
 export function gitSetupStatus(): Promise<GitSetupStatus> {
   return invoke("git_setup_status");
+}
+export function configureCredentialHelper(): Promise<ConfigureHelperResult> {
+  return invoke("configure_credential_helper");
 }
 
 // ---- system ----

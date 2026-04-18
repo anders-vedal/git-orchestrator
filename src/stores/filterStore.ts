@@ -8,10 +8,6 @@ export type StatusFilter =
   | "outOfSync"
   | "clean"
   | "dirty"
-  | "untracked"
-  | "unstaged"
-  | "staged"
-  | "mixed"
   | "errors";
 
 interface FilterState {
@@ -77,12 +73,16 @@ function matchesFilter(s: RepoStatus, filter: StatusFilter): boolean {
       );
     case "dirty":
       return s.dirty !== "clean";
-    case "untracked":
-    case "unstaged":
-    case "staged":
-    case "mixed":
-      return s.dirty === filter;
   }
+}
+
+export function countByFilter(
+  statuses: RepoStatus[],
+  filter: StatusFilter,
+): number {
+  let n = 0;
+  for (const s of statuses) if (matchesFilter(s, filter)) n++;
+  return n;
 }
 
 function commitTime(s: RepoStatus): number {

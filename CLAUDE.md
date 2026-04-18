@@ -104,11 +104,22 @@ conflict.
    menu "Quit", the task manager, or a background event. Left-click toggles
    the window; right-click opens the menu.
 
-10. **Git invocations carry per-call hardening flags.** `runner::build_command`
-    always prefixes every `git` call with `-c core.fsmonitor= -c protocol.ext.allow=never`
+10. **Git invocations carry per-call hardening flags.** `runner::new_git_command`
+    always prefixes every `git` call with
+    `-c core.fsmonitor= -c protocol.ext.allow=never -c credential.helper=`,
     so a hostile `.git/config` in a watched repo cannot trigger RCE on the
-    refresh timer. See `HARDENING_FLAGS` in `git/runner.rs` and the residual
-    risks (SSH command, aliases, hooks) catalogued in `docs/security.md`.
+    refresh timer. See `BASE_HARDENING_FLAGS` in `git/runner.rs` and the
+    residual risks (SSH command, aliases, hooks) catalogued in `docs/security.md`.
+    The third flag — `credential.helper=` (empty) — resets git's helper chain
+    so a repo-local `credential.helper=!shell-cmd` cannot be appended to the
+    chain git consults during fetch/pull/sign-in. Helper values prefixed with
+    `!` are run as shell commands by git; without this reset, any watched
+    repo could inject RCE the moment the user clicked Fetch. After the reset
+    we re-pin the user's GLOBAL helper via `resolved_credential_helper()` so
+    legitimate fetch/pull/sign-in flows still work. The global helper is
+    cached at the runner layer and invalidated via
+    `invalidate_credential_helper_cache()` after
+    `configure_credential_helper` writes a new value.
 
 11. **UNC paths are rejected at add-time (Windows only).** `commands/repos.rs::canonical`
     refuses paths beginning with `\\` or `//` under `#[cfg(windows)]`. Running

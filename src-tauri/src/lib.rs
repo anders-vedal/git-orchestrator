@@ -34,6 +34,7 @@ pub fn run() {
             status::get_repo_status,
             status::get_all_statuses,
             status::get_repo_log,
+            status::get_changed_files,
             // git ops
             git_ops::git_fetch,
             git_ops::git_pull_ff,
@@ -46,6 +47,7 @@ pub fn run() {
             git_ops::diagnose_auth,
             git_ops::sign_in_remote,
             git_ops::git_setup_status,
+            git_ops::configure_credential_helper,
             // system
             system::open_folder,
             system::open_terminal,
