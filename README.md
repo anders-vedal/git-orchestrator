@@ -105,4 +105,4 @@ for deeper architecture notes and debugging guides.
 
 ## License
 
-Not published externally — single-user internal tool.
+MIT — see [`LICENSE`](./LICENSE).
