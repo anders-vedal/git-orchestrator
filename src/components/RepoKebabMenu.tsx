@@ -1,6 +1,7 @@
 import clsx from "clsx";
 import {
   AlertOctagon,
+  Check,
   FolderOpen,
   Globe,
   Loader2,
@@ -15,7 +16,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../lib/tauri";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useUiStore } from "../stores/uiStore";
-import type { RepoStatus } from "../types";
+import type { PushModeInfo, PushModePref, RepoStatus } from "../types";
 import { IconButton } from "./ui/Button";
 
 export interface RunOpts {
@@ -53,6 +54,9 @@ export function RepoKebabMenu({
   const ref = useRef<HTMLDivElement>(null);
   const openDialog = useUiStore((s) => s.openDialog);
   const cliActions = useSettingsStore((s) => s.settings.cliActions);
+  const globalPushMode = useSettingsStore((s) => s.settings.pushMode);
+  const [pushModeInfo, setPushModeInfo] = useState<PushModeInfo | null>(null);
+  const [pushModeBusy, setPushModeBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -69,6 +73,23 @@ export function RepoKebabMenu({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    api
+      .getPushModeInfo(status.id)
+      .then((info) => {
+        if (!cancelled) setPushModeInfo(info);
+      })
+      .catch(() => {
+        // The submenu falls back to "loading…" if this fails; no reason to
+        // block the whole menu on a cosmetic lookup.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, status.id]);
 
   function close() {
     setOpen(false);
@@ -128,6 +149,25 @@ export function RepoKebabMenu({
   function clickRemove() {
     close();
     onRemove();
+  }
+
+  async function setPushMode(mode: PushModePref | null) {
+    if (pushModeBusy) return;
+    // Optimistic — on error we reload from the backend to clear any drift.
+    const previous = pushModeInfo;
+    const effective: PushModePref =
+      mode ?? (globalPushMode === "pr" ? "pr" : "direct");
+    setPushModeInfo({ override: mode, effective });
+    setPushModeBusy(true);
+    try {
+      await api.setRepoPushMode(status.id, mode);
+      const fresh = await api.getPushModeInfo(status.id);
+      setPushModeInfo(fresh);
+    } catch {
+      setPushModeInfo(previous);
+    } finally {
+      setPushModeBusy(false);
+    }
   }
 
   return (
@@ -195,6 +235,30 @@ export function RepoKebabMenu({
           <MenuItem icon={<Pencil size={14} />} onClick={clickRename}>
             Rename
           </MenuItem>
+
+          <MenuSeparator />
+          <MenuHeader>Push mode</MenuHeader>
+          <PushModeRow
+            selected={pushModeInfo?.override == null}
+            onSelect={() => void setPushMode(null)}
+            disabled={pushModeBusy}
+            label={`Use default (${globalPushMode === "pr" ? "PR branch" : "direct"})`}
+            subtitle="Inherits the global Settings value"
+          />
+          <PushModeRow
+            selected={pushModeInfo?.override === "direct"}
+            onSelect={() => void setPushMode("direct")}
+            disabled={pushModeBusy}
+            label="Push to current branch"
+            subtitle="Commits push straight to the branch you're on"
+          />
+          <PushModeRow
+            selected={pushModeInfo?.override === "pr"}
+            onSelect={() => void setPushMode("pr")}
+            disabled={pushModeBusy}
+            label="Create PR branch"
+            subtitle={`Commits on default branch off into a new branch for a PR against ${status.defaultBranch}`}
+          />
 
           <MenuSeparator />
           <MenuHeader>Danger</MenuHeader>
@@ -282,6 +346,48 @@ function MenuItem({
             {subtitle}
           </span>
         )}
+      </span>
+    </button>
+  );
+}
+
+interface PushModeRowProps {
+  selected: boolean;
+  onSelect: () => void;
+  disabled?: boolean;
+  label: string;
+  subtitle: string;
+}
+
+/** A check-marked menu row for the push-mode override submenu. Visually
+ *  like a MenuItem but the "icon" slot carries the selection indicator
+ *  and the row stays in place on click so the user sees the checkmark
+ *  move without the menu closing. */
+function PushModeRow({
+  selected,
+  onSelect,
+  disabled,
+  label,
+  subtitle,
+}: PushModeRowProps) {
+  return (
+    <button
+      role="menuitemradio"
+      aria-checked={selected}
+      onClick={onSelect}
+      disabled={disabled}
+      className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-sm text-zinc-100 transition hover:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+        {selected ? (
+          <Check size={14} className="text-blue-300" />
+        ) : (
+          <span className="h-3.5 w-3.5 rounded-full border border-border" />
+        )}
+      </span>
+      <span className="flex min-w-0 flex-col items-start">
+        <span className="truncate font-medium">{label}</span>
+        <span className="truncate text-[11px] text-zinc-500">{subtitle}</span>
       </span>
     </button>
   );

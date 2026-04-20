@@ -16,6 +16,7 @@ import { useUiStore } from "../../stores/uiStore";
 import type {
   CliAction,
   IgnoredPath,
+  PushModePref,
   Settings,
   TerminalPref,
   ThemePref,
@@ -430,6 +431,22 @@ export function SettingsDialog() {
         </div>
 
         <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-zinc-400">
+            Commit &amp; push behaviour{" "}
+            <span className="text-zinc-500">(default — per-repo override in the row kebab)</span>
+          </span>
+          <PushModeRadio
+            value={draft.pushMode}
+            onChange={(v) => setDraft({ ...draft, pushMode: v })}
+          />
+          <span className="text-[11px] text-zinc-500">
+            PR mode only fires when you&apos;re on the repo&apos;s default
+            branch — commits from a feature branch push that branch
+            directly regardless of this setting.
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-zinc-400">Updates</span>
           <label className="flex items-center gap-2 text-sm text-zinc-200">
             <input
@@ -505,5 +522,69 @@ export function SettingsDialog() {
         </div>
       </div>
     </Dialog>
+  );
+}
+
+interface PushModeRadioProps {
+  value: PushModePref;
+  onChange: (value: PushModePref) => void;
+}
+
+/** Two mutually-exclusive radio rows describing the global commit&push
+ *  default. Shared between the Settings dialog and (later) the per-repo
+ *  override submenu in the kebab — if the second use lands, extract to
+ *  its own file. */
+function PushModeRadio({ value, onChange }: PushModeRadioProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <PushModeOption
+        selected={value === "direct"}
+        onSelect={() => onChange("direct")}
+        title="Push directly to the current branch"
+        subtitle="Commits land on the branch you're on and push straight to its upstream. Fails with a branch-protection error on protected branches."
+      />
+      <PushModeOption
+        selected={value === "pr"}
+        onSelect={() => onChange("pr")}
+        title="Create a branch and open a PR"
+        subtitle="When you're on default, commits go on a new branch (you name it in the dialog) and push with -u. The success toast links to the provider's PR-create page."
+      />
+    </div>
+  );
+}
+
+interface PushModeOptionProps {
+  selected: boolean;
+  onSelect: () => void;
+  title: string;
+  subtitle: string;
+}
+
+function PushModeOption({
+  selected,
+  onSelect,
+  title,
+  subtitle,
+}: PushModeOptionProps) {
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-sm transition ${
+        selected
+          ? "border-blue-500/60 bg-blue-500/10"
+          : "border-border bg-surface-2 hover:border-border-strong"
+      }`}
+    >
+      <input
+        type="radio"
+        name="push-mode"
+        checked={selected}
+        onChange={onSelect}
+        className="mt-0.5 h-3.5 w-3.5 accent-blue-500"
+      />
+      <span className="flex flex-col">
+        <span className="font-medium text-zinc-100">{title}</span>
+        <span className="text-[11px] text-zinc-400">{subtitle}</span>
+      </span>
+    </label>
   );
 }

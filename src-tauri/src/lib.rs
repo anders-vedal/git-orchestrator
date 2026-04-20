@@ -35,6 +35,8 @@ pub fn run() {
             repos::remove_repo,
             repos::rename_repo,
             repos::reorder_repos,
+            repos::set_repo_push_mode,
+            repos::get_push_mode_info,
             // status
             status::get_repo_status,
             status::get_all_statuses,
@@ -62,6 +64,7 @@ pub fn run() {
             system::open_terminal,
             system::open_remote,
             system::open_commit,
+            system::open_url,
             system::set_tray_tooltip,
             // settings
             settings::get_setting,

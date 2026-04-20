@@ -4,6 +4,7 @@ import {
   DEFAULT_CLI_ACTIONS,
   DEFAULT_SETTINGS,
   type CliAction,
+  type PushModePref,
   type Settings,
   type SortByPref,
   type TerminalPref,
@@ -55,6 +56,11 @@ function asSortBy(v: string | undefined): SortByPref {
   return DEFAULT_SETTINGS.sortBy;
 }
 
+function asPushMode(v: string | undefined): PushModePref {
+  if (v === "direct" || v === "pr") return v;
+  return DEFAULT_SETTINGS.pushMode;
+}
+
 function asCliActions(v: string | undefined): CliAction[] {
   if (v === undefined || v.trim() === "") return DEFAULT_CLI_ACTIONS;
   try {
@@ -101,6 +107,7 @@ function hydrate(raw: Record<string, string>): Settings {
     cliActions: asCliActions(raw.cli_actions),
     sortBy: asSortBy(raw.sort_by),
     dimCleanRows: asBool(raw.dim_clean_rows, DEFAULT_SETTINGS.dimCleanRows),
+    pushMode: asPushMode(raw.push_mode),
   };
 }
 
@@ -114,6 +121,7 @@ const KEY_MAP: Record<keyof Settings, string> = {
   cliActions: "cli_actions",
   sortBy: "sort_by",
   dimCleanRows: "dim_clean_rows",
+  pushMode: "push_mode",
 };
 
 /** Keys whose DB value is a JSON-encoded blob rather than a scalar. */

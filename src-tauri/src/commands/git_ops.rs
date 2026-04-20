@@ -703,16 +703,26 @@ fn undo_one(
 }
 
 /// Stage every change (`git add -A`), commit with the supplied message, and
-/// optionally push to the current branch's upstream. The three phases are
-/// reported independently so a successful commit isn't hidden when the push
-/// fails (e.g. non-fast-forward, missing credentials, offline).
+/// optionally push. Two flavours, controlled by `push_mode` (falling back
+/// to the per-repo override, then the global `push_mode` setting, then
+/// `"direct"`):
+///
+/// - `"direct"` (original behaviour) — commit on the current branch, push
+///   to its upstream (or `-u origin <branch>` on first push).
+/// - `"pr"` — when the user is on the repo's default branch, create a new
+///   branch named `branch_name`, commit on it, push `-u origin <name>`,
+///   and return a provider PR compare URL. When the user is already on
+///   a non-default branch, PR mode silently falls through to direct push
+///   (pushing the feature branch is equivalent).
 ///
 /// Guards:
 /// - Refuses on a detached HEAD — can't commit to nowhere.
 /// - Refuses when there's nothing to stage — avoids empty commits.
+/// - PR mode validates the branch name via `git check-ref-format --branch`
+///   and refuses a local-branch collision before any mutation.
 /// - Push uses plain `git push` (never `--force`); on a branch with no
-///   configured upstream, we add `-u origin <branch>` so the first push
-///   also sets the upstream, which is what the user expects.
+///   configured upstream the direct flow adds `-u origin <branch>` so the
+///   first push also sets the upstream.
 /// - Pre- and post-HEAD SHAs are written to `action_log` so a future
 ///   "undo commit" feature can restore via `git reset --soft` without
 ///   data loss.
@@ -721,6 +731,8 @@ pub async fn git_commit_push(
     id: i64,
     message: String,
     push: bool,
+    push_mode: Option<String>,
+    branch_name: Option<String>,
 ) -> Result<CommitPushResult, String> {
     let trimmed = message.trim().to_string();
     if trimmed.is_empty() {
@@ -731,6 +743,46 @@ pub async fn git_commit_push(
     let path = repo.path.clone();
     let repo_id = repo.id;
 
+    // Resolve effective push mode: explicit param → repo override → global
+    // setting → "direct". Keeps the wire protocol simple — callers usually
+    // pass None and let the backend decide.
+    let global = db::with_conn(|c| db::queries::get_setting(c, "push_mode"))
+        .ok()
+        .flatten();
+    let override_mode = push_mode.as_deref().or(repo.push_mode.as_deref());
+    let effective_mode = crate::commands::repos::resolve_effective_push_mode(
+        override_mode,
+        global.as_deref(),
+    );
+
+    // PR mode is only meaningful when the caller actually wants to push —
+    // a PR without a push has nothing to compare. Keep the flag internal.
+    let want_pr_mode = effective_mode == "pr" && push;
+
+    // Pre-validate branch_name before we enter spawn_blocking so a bad
+    // name never reaches the working tree. Authoritative shape check
+    // happens inside via `git check-ref-format`.
+    let pr_branch = if want_pr_mode {
+        let name = branch_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                "PR mode requires a branch name — open the dialog and fill the Branch field."
+                    .to_string()
+            })?;
+        if name.len() > 200
+            || name
+                .chars()
+                .any(|c| c == ' ' || c == '\n' || c == '\r' || c == '\t')
+        {
+            return Err(format!("invalid branch name: {name:?}"));
+        }
+        Some(name.to_string())
+    } else {
+        None
+    };
+
     tokio::task::spawn_blocking(move || -> Result<CommitPushResult, String> {
         let p = Path::new(&path);
 
@@ -740,10 +792,32 @@ pub async fn git_commit_push(
                 "refuse to commit: HEAD is detached. Check out a branch first.".to_string(),
             );
         }
+        let default = status::default_branch(p).map_err(|e| e.to_string())?;
+
+        // PR mode only activates when the user is on the default branch.
+        // On a feature branch, pushing that branch directly produces the
+        // same compare-able outcome without adding a redundant layer.
+        let activate_pr = want_pr_mode && branch == default && pr_branch.is_some();
 
         let pre_head = status::current_head_sha(p).map_err(|e| e.to_string())?;
         let started_at = now_iso();
         let t0 = Instant::now();
+
+        if activate_pr {
+            return commit_push_pr_flow(
+                p,
+                repo_id,
+                &branch,
+                &default,
+                pr_branch.as_deref().unwrap(),
+                &trimmed,
+                pre_head.as_deref(),
+                &started_at,
+                t0,
+            );
+        }
+
+        // --- Direct push flow (original behaviour, unchanged) -------------
 
         // 1. Stage everything.
         let add = runner::run_git_raw(p, &["add", "-A"]).map_err(|e| e.to_string())?;
@@ -771,18 +845,7 @@ pub async fn git_commit_push(
             );
         }
 
-        let staged_files = {
-            let out = runner::run_git_raw(p, &["diff", "--cached", "--name-only", "-z"])
-                .map_err(|e| e.to_string())?;
-            if out.code == 0 {
-                out.stdout
-                    .split('\0')
-                    .filter(|s| !s.is_empty())
-                    .count() as u32
-            } else {
-                0
-            }
-        };
+        let staged_files = count_staged_files(p);
 
         // 3. Commit.
         let commit = runner::run_git_raw(p, &["commit", "-m", &trimmed])
@@ -815,6 +878,8 @@ pub async fn git_commit_push(
             pushed: false,
             upstream_set: false,
             push_output: String::new(),
+            branch_created: false,
+            pr_url: None,
         };
 
         // 4. Push (opt-in). We only surface the outcome — a failure here
@@ -877,6 +942,197 @@ pub async fn git_commit_push(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn count_staged_files(p: &Path) -> u32 {
+    match runner::run_git_raw(p, &["diff", "--cached", "--name-only", "-z"]) {
+        Ok(out) if out.code == 0 => out
+            .stdout
+            .split('\0')
+            .filter(|s| !s.is_empty())
+            .count() as u32,
+        _ => 0,
+    }
+}
+
+/// PR-mode branch: checkout -b, stage, commit, push -u, compute PR URL.
+/// Fails fast on branch-name collisions so we never commit on an existing
+/// branch by accident. Attempts a best-effort revert to the original
+/// branch when an early step fails, so the user isn't left stranded on
+/// an empty branch.
+#[allow(clippy::too_many_arguments)]
+fn commit_push_pr_flow(
+    p: &Path,
+    repo_id: i64,
+    original_branch: &str,
+    default_branch: &str,
+    new_branch: &str,
+    message: &str,
+    pre_head: Option<&str>,
+    started_at: &str,
+    t0: Instant,
+) -> Result<CommitPushResult, String> {
+    // Authoritative branch-name check via git itself. Rejects names with
+    // control chars, invalid patterns like `@{…}`, etc.
+    let refmt = runner::run_git_raw(p, &["check-ref-format", "--branch", new_branch])
+        .map_err(|e| e.to_string())?;
+    if refmt.code != 0 {
+        return Err(format!(
+            "invalid branch name '{new_branch}': {}",
+            merge_stdout_stderr(&refmt)
+        ));
+    }
+
+    // Reject local-branch collisions before any mutation — picking a
+    // different name is cheap; recovering from an overwritten branch is not.
+    let exists = runner::run_git_raw(
+        p,
+        &[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{new_branch}"),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    if exists.code == 0 {
+        return Err(format!(
+            "branch '{new_branch}' already exists locally. Pick another name."
+        ));
+    }
+
+    // Create + switch.
+    let checkout = runner::run_git_raw(p, &["checkout", "-b", new_branch])
+        .map_err(|e| e.to_string())?;
+    if checkout.code != 0 {
+        let msg = merge_stdout_stderr(&checkout);
+        log_action(
+            repo_id,
+            "commit_push",
+            pre_head,
+            None,
+            checkout.code,
+            Some(&format!("pr_mode checkout -b {new_branch} failed: {msg}")),
+            started_at,
+            t0.elapsed().as_millis() as i64,
+        );
+        return Err(msg);
+    }
+
+    // Stage.
+    let add = runner::run_git_raw(p, &["add", "-A"]).map_err(|e| e.to_string())?;
+    if add.code != 0 {
+        let msg = merge_stdout_stderr(&add);
+        // Best-effort revert: back to the original branch + drop the empty
+        // one we just made. If either fails the user has a recoverable
+        // state via `git checkout <original>` + `git branch -D <new>`.
+        let _ = runner::run_git_raw(p, &["checkout", original_branch]);
+        let _ = runner::run_git_raw(p, &["branch", "-D", new_branch]);
+        log_action(
+            repo_id,
+            "commit_push",
+            pre_head,
+            None,
+            add.code,
+            Some(&format!("pr_mode add -A failed: {msg}")),
+            started_at,
+            t0.elapsed().as_millis() as i64,
+        );
+        return Err(msg);
+    }
+
+    // Nothing staged? Undo the branch creation and report cleanly.
+    let diff = runner::run_git_raw(p, &["diff", "--cached", "--quiet"])
+        .map_err(|e| e.to_string())?;
+    if diff.code == 0 {
+        let _ = runner::run_git_raw(p, &["checkout", original_branch]);
+        let _ = runner::run_git_raw(p, &["branch", "-D", new_branch]);
+        return Err("nothing to commit — working tree is clean after staging.".to_string());
+    }
+
+    let staged_files = count_staged_files(p);
+
+    // Commit.
+    let commit = runner::run_git_raw(p, &["commit", "-m", message])
+        .map_err(|e| e.to_string())?;
+    if commit.code != 0 {
+        let msg = merge_stdout_stderr(&commit);
+        // Leave the user on the new branch with the staged index intact
+        // so they can recover (e.g. `git commit --no-verify` if a hook
+        // misfired). Cleaning up here would destroy that state.
+        log_action(
+            repo_id,
+            "commit_push",
+            pre_head,
+            None,
+            commit.code,
+            Some(&format!("pr_mode commit failed: {msg}")),
+            started_at,
+            t0.elapsed().as_millis() as i64,
+        );
+        return Err(msg);
+    }
+
+    let post_head = status::current_head_sha(p).map_err(|e| e.to_string())?;
+
+    // Push + set upstream.
+    let push_out = runner::run_git_raw(p, &["push", "-u", "origin", new_branch])
+        .map_err(|e| e.to_string())?;
+    let push_text = merge_stdout_stderr(&push_out);
+    let pushed = push_out.code == 0;
+
+    // Compute PR URL — only when we actually pushed, so we never point
+    // the user at a compare page for a branch that doesn't exist remotely.
+    let pr_url = if pushed {
+        crate::git::remote::origin_url(p)
+            .ok()
+            .flatten()
+            .and_then(|r| crate::git::remote::compare_web_url(&r, default_branch, new_branch))
+    } else {
+        None
+    };
+
+    let summary = if pushed {
+        format!(
+            "Committed {} on new branch {} · Pushed to origin. Default: {}.",
+            post_head.as_deref().map(short_sha).unwrap_or_default(),
+            new_branch,
+            default_branch,
+        )
+    } else {
+        format!(
+            "Committed {} on new branch {} · Push failed: {}",
+            post_head.as_deref().map(short_sha).unwrap_or_default(),
+            new_branch,
+            push_text,
+        )
+    };
+
+    log_action(
+        repo_id,
+        "commit_push",
+        pre_head,
+        post_head.as_deref(),
+        0,
+        excerpt(&summary).as_deref(),
+        started_at,
+        t0.elapsed().as_millis() as i64,
+    );
+
+    Ok(CommitPushResult {
+        branch: new_branch.to_string(),
+        staged_files,
+        committed: true,
+        commit_sha: post_head.clone(),
+        commit_short: post_head.as_deref().map(short_sha),
+        commit_message: message.to_string(),
+        push_attempted: true,
+        pushed,
+        upstream_set: true,
+        push_output: push_text,
+        branch_created: true,
+        pr_url,
+    })
 }
 
 /// Re-runs `git fetch --dry-run` against the repo's origin with GIT_TRACE

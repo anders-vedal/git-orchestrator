@@ -337,6 +337,20 @@ async fn open_url_via_opener(
         .map_err(|e| e.to_string())
 }
 
+/// Open an arbitrary http(s) URL in the user's default browser.
+///
+/// Used by the commit dialog's "Open PR" button — the URL itself is
+/// computed backend-side (`compare_web_url`) and round-trips through
+/// the frontend, but we still re-validate the scheme at the IPC
+/// boundary (invariant #5). The tauri-plugin-opener capability is
+/// already restricted to `http://**` / `https://**` in
+/// `capabilities/default.json`, so this command sits behind two layers:
+/// the capability gate AND the scheme check.
+#[tauri::command]
+pub async fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    open_url_via_opener(&app, &url).await
+}
+
 #[tauri::command]
 pub async fn open_remote(app: tauri::AppHandle, id: i64) -> Result<(), String> {
     let path = load_path(id).await?;

@@ -22,6 +22,8 @@ import type {
   ForcePullResult,
   GitSetupStatus,
   IgnoredPath,
+  PushModeInfo,
+  PushModePref,
   RecentActionGroup,
   Repo,
   RepoStatus,
@@ -53,6 +55,20 @@ export function renameRepo(id: number, newName: string): Promise<void> {
 }
 export function reorderRepos(orderedIds: number[]): Promise<void> {
   return invoke("reorder_repos", { orderedIds });
+}
+/** Set or clear the per-repo push-mode override. Pass `null` to inherit
+ *  the global setting. */
+export function setRepoPushMode(
+  id: number,
+  mode: PushModePref | null,
+): Promise<void> {
+  return invoke("set_repo_push_mode", { id, mode });
+}
+/** Resolve the current push-mode state for a repo — both the per-repo
+ *  override (kebab menu reads this) and the effective resolved value
+ *  (the commit dialog reads this). */
+export function getPushModeInfo(id: number): Promise<PushModeInfo> {
+  return invoke("get_push_mode_info", { id });
 }
 
 // ---- status ----
@@ -92,12 +108,30 @@ export function gitPullFf(id: number): Promise<string> {
 export function gitForcePull(id: number): Promise<ForcePullResult> {
   return invoke("git_force_pull", { id });
 }
+/** Stage + commit + optionally push.
+ *
+ *  `pushMode` forces a specific mode for this call ("direct" pushes the
+ *  current branch; "pr" creates a new branch from default and pushes
+ *  that so the user can open a PR). Pass `null` to let the backend
+ *  resolve via the per-repo override + global setting.
+ *
+ *  `branchName` is required when `pushMode` (effective or forced) is "pr"
+ *  AND the repo is currently on its default branch — otherwise ignored.
+ */
 export function gitCommitPush(
   id: number,
   message: string,
   push: boolean,
+  pushMode?: PushModePref | null,
+  branchName?: string | null,
 ): Promise<CommitPushResult> {
-  return invoke("git_commit_push", { id, message, push });
+  return invoke("git_commit_push", {
+    id,
+    message,
+    push,
+    pushMode: pushMode ?? null,
+    branchName: branchName ?? null,
+  });
 }
 /**
  * Bulk fetch. `ids` undefined = every repo; otherwise restrict to the
@@ -172,6 +206,11 @@ export function openRemote(id: number): Promise<void> {
 }
 export function openCommit(id: number, sha: string): Promise<void> {
   return invoke("open_commit", { id, sha });
+}
+/** Open any http(s) URL in the user's default browser. Scheme-checked
+ *  at the backend. Used by the Open-PR button in the commit dialog. */
+export function openUrl(url: string): Promise<void> {
+  return invoke("open_url", { url });
 }
 export function setTrayTooltip(text: string): Promise<void> {
   return invoke("set_tray_tooltip", { text });

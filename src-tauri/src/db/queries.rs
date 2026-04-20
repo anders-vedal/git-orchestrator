@@ -8,7 +8,8 @@ use std::path::Path;
 
 pub fn list_repos(conn: &Connection) -> Result<Vec<Repo>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, path, priority, added_at FROM repos ORDER BY priority ASC, id ASC",
+        "SELECT id, name, path, priority, added_at, push_mode
+         FROM repos ORDER BY priority ASC, id ASC",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(Repo {
@@ -17,6 +18,7 @@ pub fn list_repos(conn: &Connection) -> Result<Vec<Repo>, rusqlite::Error> {
             path: row.get(2)?,
             priority: row.get(3)?,
             added_at: row.get(4)?,
+            push_mode: row.get(5)?,
         })
     })?;
     let mut out = Vec::new();
@@ -46,7 +48,8 @@ pub fn list_repos_filtered(
 
 pub fn find_repo(conn: &Connection, id: i64) -> Result<Repo, rusqlite::Error> {
     conn.query_row(
-        "SELECT id, name, path, priority, added_at FROM repos WHERE id = ?1",
+        "SELECT id, name, path, priority, added_at, push_mode
+         FROM repos WHERE id = ?1",
         params![id],
         |row| {
             Ok(Repo {
@@ -55,6 +58,7 @@ pub fn find_repo(conn: &Connection, id: i64) -> Result<Repo, rusqlite::Error> {
                 path: row.get(2)?,
                 priority: row.get(3)?,
                 added_at: row.get(4)?,
+                push_mode: row.get(5)?,
             })
         },
     )
@@ -89,6 +93,21 @@ pub fn rename_repo(conn: &Connection, id: i64, new_name: &str) -> Result<(), rus
     conn.execute(
         "UPDATE repos SET name = ?1 WHERE id = ?2",
         params![new_name, id],
+    )?;
+    Ok(())
+}
+
+/// Set or clear the per-repo `push_mode` override. Pass `None` to clear
+/// (falls back to the global setting). Caller is responsible for validating
+/// that `mode` is one of the known values ("direct", "pr") before calling.
+pub fn set_repo_push_mode(
+    conn: &Connection,
+    id: i64,
+    mode: Option<&str>,
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "UPDATE repos SET push_mode = ?1 WHERE id = ?2",
+        params![mode, id],
     )?;
     Ok(())
 }

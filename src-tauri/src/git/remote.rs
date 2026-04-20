@@ -103,6 +103,70 @@ pub fn commit_web_url(remote: &str, sha: &str) -> Option<String> {
     }
 }
 
+/// Build the provider's "open a PR from head → base" URL so a pushed
+/// branch can be converted to a pull/merge request with one click.
+/// Returns None for unknown providers — the caller falls back to
+/// opening the repo's generic web URL.
+///
+/// Provider shapes:
+///   - GitHub:    `.../compare/{base}...{head}?expand=1`
+///   - GitLab:    `.../-/merge_requests/new?merge_request[source_branch]={head}
+///                                         &merge_request[target_branch]={base}`
+///   - Azure:     `.../pullrequestcreate?sourceRef={head}&targetRef={base}`
+///   - Bitbucket: `.../pull-requests/new?source={head}&dest={base}`
+///
+/// Branch names are percent-encoded so non-ascii/slashes round-trip
+/// through the URL cleanly (we already accept any valid git ref name,
+/// which allows `/`).
+pub fn compare_web_url(remote: &str, base: &str, head: &str) -> Option<String> {
+    if base.is_empty() || head.is_empty() {
+        return None;
+    }
+    let web = to_web_url(remote)?;
+    let base_enc = percent_encode_branch(base);
+    let head_enc = percent_encode_branch(head);
+
+    if web.contains("dev.azure.com") {
+        // Azure wants `refs/heads/<name>` on the query string.
+        Some(format!(
+            "{web}/pullrequestcreate?sourceRef=refs%2Fheads%2F{head_enc}&targetRef=refs%2Fheads%2F{base_enc}"
+        ))
+    } else if web.contains("gitlab.") {
+        Some(format!(
+            "{web}/-/merge_requests/new?merge_request%5Bsource_branch%5D={head_enc}&merge_request%5Btarget_branch%5D={base_enc}"
+        ))
+    } else if web.contains("bitbucket.") {
+        Some(format!(
+            "{web}/pull-requests/new?source={head_enc}&dest={base_enc}"
+        ))
+    } else {
+        // GitHub (and reasonable default for unknown https-hosted Git servers).
+        Some(format!("{web}/compare/{base_enc}...{head_enc}?expand=1"))
+    }
+}
+
+/// Minimal percent-encoder for the characters that appear in branch
+/// names and are unsafe in URL path/query positions. Avoids pulling in
+/// a full URL-encoding crate for the handful of branch chars we care
+/// about (space + `#`, `?`, `&`, `%`, `+`). Valid git ref names can
+/// also contain `/`, which we intentionally pass through unchanged so
+/// the URL keeps its directory-like shape.
+fn percent_encode_branch(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '~' | '/' => out.push(ch),
+            _ => {
+                let mut buf = [0u8; 4];
+                for b in ch.encode_utf8(&mut buf).as_bytes() {
+                    out.push_str(&format!("%{:02X}", b));
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +246,116 @@ mod tests {
         assert_eq!(
             commit_web_url("git@ssh.dev.azure.com:v3/o/p/r", "abc123").as_deref(),
             Some("https://dev.azure.com/o/p/_git/r/commit/abc123")
+        );
+    }
+
+    #[test]
+    fn compare_url_github() {
+        assert_eq!(
+            compare_web_url("git@github.com:org/repo.git", "main", "feat/x").as_deref(),
+            Some("https://github.com/org/repo/compare/main...feat/x?expand=1")
+        );
+        assert_eq!(
+            compare_web_url("https://github.com/org/repo", "main", "feat/x").as_deref(),
+            Some("https://github.com/org/repo/compare/main...feat/x?expand=1")
+        );
+    }
+
+    #[test]
+    fn compare_url_gitlab_subgroup() {
+        assert_eq!(
+            compare_web_url(
+                "git@gitlab.com:group/sub/repo.git",
+                "main",
+                "feat/auth",
+            )
+            .as_deref(),
+            Some(
+                "https://gitlab.com/group/sub/repo/-/merge_requests/new?\
+                 merge_request%5Bsource_branch%5D=feat/auth\
+                 &merge_request%5Btarget_branch%5D=main",
+            )
+        );
+    }
+
+    #[test]
+    fn compare_url_azure() {
+        assert_eq!(
+            compare_web_url(
+                "git@ssh.dev.azure.com:v3/MyOrg/MyProj/MyRepo",
+                "main",
+                "users/alice/feature",
+            )
+            .as_deref(),
+            Some(
+                "https://dev.azure.com/MyOrg/MyProj/_git/MyRepo/pullrequestcreate?\
+                 sourceRef=refs%2Fheads%2Fusers/alice/feature\
+                 &targetRef=refs%2Fheads%2Fmain",
+            )
+        );
+    }
+
+    #[test]
+    fn compare_url_bitbucket() {
+        assert_eq!(
+            compare_web_url(
+                "git@bitbucket.org:team/proj.git",
+                "main",
+                "bugfix/login",
+            )
+            .as_deref(),
+            Some(
+                "https://bitbucket.org/team/proj/pull-requests/new?\
+                 source=bugfix/login&dest=main",
+            )
+        );
+    }
+
+    #[test]
+    fn compare_url_unknown_provider_falls_back_to_github_shape() {
+        // Self-hosted git server — we don't know its PR URL scheme, but
+        // defaulting to GitHub-style compare/... is still useful (many
+        // providers proxy GitHub-compatible URLs) and falls through to a
+        // sane 404 on genuinely unsupported hosts. The caller still gets
+        // a click-through into the repo's web view.
+        assert_eq!(
+            compare_web_url("git@self-hosted.example:org/repo.git", "main", "branch")
+                .as_deref(),
+            Some("https://self-hosted.example/org/repo/compare/main...branch?expand=1")
+        );
+    }
+
+    #[test]
+    fn compare_url_empty_branches_returns_none() {
+        assert_eq!(
+            compare_web_url("git@github.com:org/repo.git", "", "feat"),
+            None
+        );
+        assert_eq!(
+            compare_web_url("git@github.com:org/repo.git", "main", ""),
+            None
+        );
+    }
+
+    #[test]
+    fn compare_url_unknown_remote_returns_none() {
+        assert_eq!(compare_web_url("not a url", "main", "feat"), None);
+    }
+
+    #[test]
+    fn compare_url_encodes_special_chars() {
+        // Branch names with spaces or `#` should round-trip.
+        assert_eq!(
+            compare_web_url("git@github.com:org/repo.git", "main", "feat with space")
+                .as_deref(),
+            Some(
+                "https://github.com/org/repo/compare/main...feat%20with%20space?expand=1"
+            )
+        );
+        assert_eq!(
+            compare_web_url("git@github.com:org/repo.git", "main", "fix/#123")
+                .as_deref(),
+            Some("https://github.com/org/repo/compare/main...fix/%23123?expand=1")
         );
     }
 }
