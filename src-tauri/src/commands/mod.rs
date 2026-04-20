@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod auto_fetch;
 pub mod branch;
 pub mod cli_actions;
 pub mod git_ops;

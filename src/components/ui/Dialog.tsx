@@ -34,11 +34,11 @@ export function Dialog({ open, onClose, title, children, footer, wide }: Props) 
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
         className={clsx(
-          "w-full rounded-lg border border-border-strong bg-surface-1 shadow-2xl",
+          "flex max-h-[90vh] w-full flex-col rounded-lg border border-border-strong bg-surface-1 shadow-2xl",
           wide ? "max-w-2xl" : "max-w-md",
         )}
       >
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
           <h2 className="text-base font-semibold">{title}</h2>
           <button
             aria-label="Close"
@@ -48,9 +48,11 @@ export function Dialog({ open, onClose, title, children, footer, wide }: Props) 
             <X size={16} />
           </button>
         </div>
-        <div className="px-4 py-3 text-sm text-zinc-200">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 text-sm text-zinc-200">
+          {children}
+        </div>
         {footer ? (
-          <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-3">
             {footer}
           </div>
         ) : null}

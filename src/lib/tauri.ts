@@ -40,6 +40,15 @@ import type {
   WorkspaceSummary,
 } from "../types";
 
+/** Payload of the `auto-fetch-complete` event. Mirrors
+ *  `AutoFetchReport` in `src-tauri/src/commands/auto_fetch.rs`. */
+export interface AutoFetchReport {
+  ranAt: string;
+  durationMs: number;
+  fetched: BulkResult[];
+  pulled: BulkPullReport;
+}
+
 // ---- repos ----
 export function listRepos(): Promise<Repo[]> {
   return invoke("list_repos");
@@ -223,6 +232,15 @@ export function getSetting(key: string): Promise<string | null> {
 export function setSetting(key: string, value: string): Promise<void> {
   return invoke("set_setting", { key, value });
 }
+
+// ---- auto-fetch ----
+/** Fire one auto-fetch round immediately. Powers the "Run now" button
+ *  in settings; the scheduler invokes the underlying command on its
+ *  own cadence. Fetches every repo, FF-pulls the safe subset. */
+export function autoFetchRunOnce(): Promise<AutoFetchReport> {
+  return invoke("auto_fetch_run_once");
+}
+export const EVENT_AUTO_FETCH_COMPLETE = "auto-fetch-complete";
 
 // ---- cli actions (Claude Code launcher) ----
 /** Launch Claude Code in a repo's terminal with the chosen slash command

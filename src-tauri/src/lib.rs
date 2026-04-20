@@ -6,8 +6,8 @@ mod tray;
 mod util;
 
 use commands::{
-    activity, branch, cli_actions, git_ops, repos, scan, settings, stash, status, system,
-    workspaces,
+    activity, auto_fetch, branch, cli_actions, git_ops, repos, scan, settings, stash, status,
+    system, workspaces,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,6 +25,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             tray::build(app.handle())?;
+            auto_fetch::spawn_scheduler(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| tray::on_window_event(window, event))
@@ -69,6 +70,8 @@ pub fn run() {
             // settings
             settings::get_setting,
             settings::set_setting,
+            // auto-fetch
+            auto_fetch::auto_fetch_run_once,
             // cli actions (Claude Code launcher)
             cli_actions::run_cli_action,
             cli_actions::list_cli_actions,

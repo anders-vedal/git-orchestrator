@@ -181,11 +181,23 @@ conflict.
     never bare `--force`.** The auto-refresh loop silently fetches in the
     background, which invalidates naive `--force-with-lease` safety
     (microsoft/vscode#144635). `--force-if-includes` (Git 2.30+) closes
-    that race. The current `git_commit_push` never force-pushes (see #17),
+    that race. The current `git_commit_push` never force-pushes (see #18),
     so this invariant applies to any future force-push feature we add.
     See `docs/safety-model.md` §"Future destructive ops".
 
-17. **Commit & push is opt-in, single-button, bare-push-only.** The
+17. **Auto-fetch never mutates the working tree beyond a fast-forward.**
+    The background scheduler in `commands/auto_fetch.rs` runs
+    `git fetch --all --prune` on every repo (always safe — only remote
+    tracking refs change) and then an **opt-in** FF-pull on the subset
+    that is on its default branch + clean + has an upstream + is behind
+    only (not diverged). Dirty, off-default, and diverged repos are
+    fetch-only. Any future extension must keep this gate — especially
+    when tempted to add "reset hard if behind" or similar. The
+    scheduling loop also never retries on failure beyond the next tick;
+    we do not want auto-fetch to hammer remotes under credential-helper
+    pressure.
+
+18. **Commit & push is opt-in, single-button, bare-push-only.** The
     `git_commit_push` command stages with `git add -A`, commits with a
     required user-supplied message, then — only if the user ticks the
     push checkbox — runs either `git push` (upstream exists) or
@@ -311,9 +323,13 @@ point-in-time document; this is the current state):
 - Commit & push (opt-in, single-button) — `git_commit_push` command +
   `CommitPushDialog`. Stages all changes, commits with a required message,
   optionally pushes (never `--force`). Logged to `action_log` under action
-  `commit_push`. See invariant #17.
+  `commit_push`. See invariant #18.
 - Working-tree file preview — `get_changed_files` command + `RepoChangesPanel`.
   Shown in the expanded row when dirty, capped at 100 files.
+- Auto-fetch scheduler — `commands/auto_fetch.rs`. Optional background
+  `git fetch --all` on every repo plus an FF-pull for the safe subset,
+  configurable cadence (5 min up to 7 days) with a day/time anchor for
+  daily / weekly schedules. See invariant #17.
 
 ## Further reading
 

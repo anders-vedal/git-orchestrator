@@ -268,6 +268,33 @@ export interface Settings {
    * `repos.push_mode`.
    */
   pushMode: PushModePref;
+  /**
+   * Auto-fetch: background scheduled `git fetch --all` on every repo
+   * plus an additional FF-pull for repos that are on their default
+   * branch and clean. Never rewrites history, never touches dirty
+   * working trees. Scheduler runs in the Rust backend, not in the
+   * frontend setInterval loop — fires even when the window is hidden
+   * to the tray.
+   */
+  autoFetchEnabled: boolean;
+  autoFetchIntervalSec: number;
+  /**
+   * Optional day-of-week anchor (0 = Sunday, ..., 6 = Saturday). Only
+   * meaningful at intervals >= 7 days. `null` means "no weekly anchor".
+   */
+  autoFetchAnchorDow: number | null;
+  /**
+   * Optional hour-of-day (0..23). Meaningful at intervals >= 1 hour.
+   * `null` means "no anchor" (fires every N seconds from app start).
+   */
+  autoFetchAnchorHour: number | null;
+  autoFetchAnchorMinute: number | null;
+  /**
+   * RFC3339 timestamp of the last completed auto-fetch round. Written
+   * by the scheduler, read-only from the UI's perspective. `null` =
+   * never run in this install.
+   */
+  autoFetchLastRunAt: string | null;
 }
 
 export const DEFAULT_CLI_ACTIONS: CliAction[] = [
@@ -285,7 +312,35 @@ export const DEFAULT_SETTINGS: Settings = {
   sortBy: "attention",
   dimCleanRows: true,
   pushMode: "direct",
+  autoFetchEnabled: false,
+  // 24h default when the user flips the switch — the most conservative
+  // useful cadence. UI lets them change immediately.
+  autoFetchIntervalSec: 24 * 3600,
+  autoFetchAnchorDow: null,
+  autoFetchAnchorHour: 8,
+  autoFetchAnchorMinute: 0,
+  autoFetchLastRunAt: null,
 };
+
+/**
+ * Whitelisted auto-fetch cadence values, seconds. UI uses these verbatim
+ * for the dropdown + is the set of values the backend scheduler is known
+ * to compute next-fire correctly for. Adding a value here doesn't require
+ * a backend change (the scheduler accepts any positive integer), but the
+ * anchor-visibility rules in SettingsDialog depend on this set.
+ */
+export const AUTO_FETCH_INTERVALS_SEC = [
+  5 * 60,
+  15 * 60,
+  30 * 60,
+  60 * 60,
+  4 * 60 * 60,
+  8 * 60 * 60,
+  24 * 60 * 60,
+  7 * 24 * 60 * 60,
+] as const;
+
+export type AutoFetchIntervalSec = (typeof AUTO_FETCH_INTERVALS_SEC)[number];
 
 export interface SignInResult {
   ok: boolean;

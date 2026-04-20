@@ -22,6 +22,12 @@ import {
   SHORTCUT_BULK_FETCH,
   SHORTCUT_BULK_PULL,
 } from "../hooks/useGlobalKeymap";
+import {
+  describeSchedule,
+  formatNextFire,
+  predictNextFire,
+} from "../lib/autoFetch";
+import { timeAgo } from "../lib/format";
 import * as api from "../lib/tauri";
 import { useReposStore } from "../stores/reposStore";
 import { useSelectionStore } from "../stores/selectionStore";
@@ -384,30 +390,63 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="mt-auto flex items-center justify-between gap-2 pt-3 text-[11px] text-zinc-500">
-        <span
-          className="flex min-w-0 items-center gap-1.5 truncate"
-          title={`Auto-refresh every ${refreshMins} minute${refreshMins === 1 ? "" : "s"}`}
-        >
-          {refreshing ? (
-            <Loader2
-              size={10}
-              className="shrink-0 animate-spin text-blue-300"
-            />
-          ) : (
-            <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-600" />
-          )}
-          <span className="truncate">Auto-refresh {refreshMins}m</span>
-        </span>
-        <IconButton
-          title="App settings — terminal launcher, auto-refresh interval, default repo directory, theme, and ignored-paths list"
-          onClick={() => openDialog({ kind: "settings" })}
-          className="h-7 w-7"
-        >
-          <SettingsIcon size={14} />
-        </IconButton>
+      <div className="mt-auto flex flex-col gap-1 pt-3 text-[11px] text-zinc-500">
+        {settings.autoFetchEnabled && (
+          <AutoFetchStatusRow />
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <span
+            className="flex min-w-0 items-center gap-1.5 truncate"
+            title={`Auto-refresh every ${refreshMins} minute${refreshMins === 1 ? "" : "s"}`}
+          >
+            {refreshing ? (
+              <Loader2
+                size={10}
+                className="shrink-0 animate-spin text-blue-300"
+              />
+            ) : (
+              <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-600" />
+            )}
+            <span className="truncate">Auto-refresh {refreshMins}m</span>
+          </span>
+          <IconButton
+            title="App settings — terminal launcher, auto-refresh interval, auto-fetch, default repo directory, theme, and ignored-paths list"
+            onClick={() => openDialog({ kind: "settings" })}
+            className="h-7 w-7"
+          >
+            <SettingsIcon size={14} />
+          </IconButton>
+        </div>
       </div>
     </aside>
+  );
+}
+
+/** Live readout for the enabled auto-fetch schedule. Rebuilds every minute
+ *  so "last: Xm ago" stays honest. Subscribes narrowly to the settings
+ *  slice so this row re-renders when a round completes (App.tsx reloads
+ *  the full settings object after the auto-fetch event). */
+function AutoFetchStatusRow() {
+  const settings = useSettingsStore((s) => s.settings);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => tick((n) => n + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const next = predictNextFire(settings);
+  const nextLabel = next ? formatNextFire(next) : "—";
+  return (
+    <span
+      className="flex min-w-0 items-center gap-1.5 truncate text-zinc-500"
+      title={`Auto-fetch: ${describeSchedule(settings)}. Last run: ${timeAgo(
+        settings.autoFetchLastRunAt,
+      )}.`}
+    >
+      <DownloadCloud size={10} className="shrink-0 text-zinc-500" />
+      <span className="truncate">
+        Fetch: {timeAgo(settings.autoFetchLastRunAt)} · next {nextLabel}
+      </span>
+    </span>
   );
 }
 

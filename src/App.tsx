@@ -1,7 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import type { RepoStatus } from "./types";
-import { EVENT_REPO_STATUS_UPDATED } from "./lib/tauri";
+import {
+  EVENT_AUTO_FETCH_COMPLETE,
+  EVENT_REPO_STATUS_UPDATED,
+} from "./lib/tauri";
 import { ActivityFeedDialog } from "./components/dialogs/ActivityFeedDialog";
 import { AddRepoDialog } from "./components/dialogs/AddRepoDialog";
 import { BranchPickerDialog } from "./components/dialogs/BranchPickerDialog";
@@ -157,6 +160,23 @@ function App() {
       if (unlisten) unlisten();
     };
   }, [applyStatusUpdate]);
+
+  // Auto-fetch round completed (scheduler or "Run now" button). Reload
+  // the settings slice so `autoFetchLastRunAt` is fresh in the sidebar,
+  // then kick off a status refresh so the dashboard reflects any newly
+  // fetched refs / fast-forwarded HEADs.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    void listen(EVENT_AUTO_FETCH_COMPLETE, () => {
+      void useSettingsStore.getState().load();
+      void refreshAllRef.current();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   // Tray menu "Fetch all" -> run the same flow as the sidebar button.
   useEffect(() => {

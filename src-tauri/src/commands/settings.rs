@@ -16,6 +16,17 @@ const ALLOWED_KEYS: &[&str] = &[
     "sort_by",
     "dim_clean_rows",
     "push_mode",
+    // auto-fetch (background scheduled fetch+FF-pull). The scheduler
+    // lives in commands::auto_fetch; these keys mirror the frontend
+    // KEY_MAP entries in settingsStore.ts. `auto_fetch_last_run_at` is
+    // written by the scheduler itself, but we keep it in the allowlist
+    // so the frontend can read it back and render "last run Xm ago".
+    "auto_fetch_enabled",
+    "auto_fetch_interval_sec",
+    "auto_fetch_anchor_dow",
+    "auto_fetch_anchor_hour",
+    "auto_fetch_anchor_minute",
+    "auto_fetch_last_run_at",
 ];
 
 fn ensure_allowed(key: &str) -> Result<(), String> {

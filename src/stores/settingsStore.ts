@@ -86,6 +86,13 @@ function asCliActions(v: string | undefined): CliAction[] {
   }
 }
 
+function asIntOrNull(v: string | undefined, min: number, max: number): number | null {
+  if (v === undefined || v === "") return null;
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return n;
+}
+
 function hydrate(raw: Record<string, string>): Settings {
   return {
     terminal: asTerminal(raw.terminal),
@@ -108,6 +115,21 @@ function hydrate(raw: Record<string, string>): Settings {
     sortBy: asSortBy(raw.sort_by),
     dimCleanRows: asBool(raw.dim_clean_rows, DEFAULT_SETTINGS.dimCleanRows),
     pushMode: asPushMode(raw.push_mode),
+    autoFetchEnabled: asBool(
+      raw.auto_fetch_enabled,
+      DEFAULT_SETTINGS.autoFetchEnabled,
+    ),
+    autoFetchIntervalSec: parseInt10(
+      raw.auto_fetch_interval_sec,
+      DEFAULT_SETTINGS.autoFetchIntervalSec,
+    ),
+    autoFetchAnchorDow: asIntOrNull(raw.auto_fetch_anchor_dow, 0, 6),
+    autoFetchAnchorHour: asIntOrNull(raw.auto_fetch_anchor_hour, 0, 23),
+    autoFetchAnchorMinute: asIntOrNull(raw.auto_fetch_anchor_minute, 0, 59),
+    autoFetchLastRunAt:
+      raw.auto_fetch_last_run_at && raw.auto_fetch_last_run_at !== ""
+        ? raw.auto_fetch_last_run_at
+        : null,
   };
 }
 
@@ -122,6 +144,12 @@ const KEY_MAP: Record<keyof Settings, string> = {
   sortBy: "sort_by",
   dimCleanRows: "dim_clean_rows",
   pushMode: "push_mode",
+  autoFetchEnabled: "auto_fetch_enabled",
+  autoFetchIntervalSec: "auto_fetch_interval_sec",
+  autoFetchAnchorDow: "auto_fetch_anchor_dow",
+  autoFetchAnchorHour: "auto_fetch_anchor_hour",
+  autoFetchAnchorMinute: "auto_fetch_anchor_minute",
+  autoFetchLastRunAt: "auto_fetch_last_run_at",
 };
 
 /** Keys whose DB value is a JSON-encoded blob rather than a scalar. */

@@ -4,10 +4,17 @@ import {
   FolderOpen,
   Loader2,
   Plus,
+  RefreshCw,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import {
+  INTERVAL_OPTIONS,
+  describeSchedule,
+  findIntervalOption,
+} from "../../lib/autoFetch";
+import { timeAgo } from "../../lib/format";
 import { getPlatform, type HostOS } from "../../lib/platform";
 import * as api from "../../lib/tauri";
 import { checkForUpdate } from "../../lib/updater";
@@ -267,7 +274,13 @@ export function SettingsDialog() {
             <option value="1800">30 minutes</option>
             <option value="3600">1 hour</option>
           </select>
+          <span className="text-[11px] text-zinc-500">
+            Re-reads <code className="text-zinc-300">git status</code> on every repo —
+            no network. Use Auto-fetch below to actually sync with remotes on a schedule.
+          </span>
         </label>
+
+        <AutoFetchSection draft={draft} setDraft={setDraft} />
 
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium text-zinc-400">
@@ -558,6 +571,183 @@ interface PushModeOptionProps {
   onSelect: () => void;
   title: string;
   subtitle: string;
+}
+
+interface AutoFetchSectionProps {
+  draft: Settings;
+  setDraft: React.Dispatch<React.SetStateAction<Settings>>;
+}
+
+/** Auto-fetch configuration — on/off toggle, interval, anchor day/time,
+ *  "run now" button, last-run readout. The backend scheduler in
+ *  `commands/auto_fetch.rs` is authoritative; changing these settings
+ *  takes effect on the next scheduler tick (≤ 30s). */
+function AutoFetchSection({ draft, setDraft }: AutoFetchSectionProps) {
+  const [runBusy, setRunBusy] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const intervalOption =
+    findIntervalOption(draft.autoFetchIntervalSec) ?? INTERVAL_OPTIONS[6];
+  const showAnchor = intervalOption.showAnchor;
+  const showDow = intervalOption.showDayOfWeek;
+
+  function onIntervalChange(value: number) {
+    const opt = findIntervalOption(value);
+    if (!opt) return;
+    setDraft((d) => ({
+      ...d,
+      autoFetchIntervalSec: value,
+      // Clear anchor fields when they're irrelevant so the stored state
+      // matches what the UI is showing.
+      autoFetchAnchorDow: opt.showDayOfWeek ? (d.autoFetchAnchorDow ?? 1) : null,
+      autoFetchAnchorHour: opt.showAnchor ? (d.autoFetchAnchorHour ?? 8) : null,
+      autoFetchAnchorMinute: opt.showAnchor
+        ? (d.autoFetchAnchorMinute ?? 0)
+        : null,
+    }));
+  }
+
+  function onTimeChange(raw: string) {
+    // HTML time input returns "HH:MM" (or "" when cleared).
+    const [h, m] = raw.split(":").map((s) => parseInt(s, 10));
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return;
+    setDraft((d) => ({
+      ...d,
+      autoFetchAnchorHour: h,
+      autoFetchAnchorMinute: m,
+    }));
+  }
+
+  async function runNow() {
+    setRunBusy(true);
+    setRunError(null);
+    try {
+      await api.autoFetchRunOnce();
+    } catch (e) {
+      setRunError(String(e));
+    } finally {
+      setRunBusy(false);
+    }
+  }
+
+  const hh = draft.autoFetchAnchorHour ?? 8;
+  const mm = draft.autoFetchAnchorMinute ?? 0;
+  const timeValue = `${hh.toString().padStart(2, "0")}:${mm.toString().padStart(2, "0")}`;
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-2.5">
+      <label className="flex items-center gap-2 text-sm text-zinc-100">
+        <input
+          type="checkbox"
+          checked={draft.autoFetchEnabled}
+          onChange={(e) =>
+            setDraft({ ...draft, autoFetchEnabled: e.currentTarget.checked })
+          }
+          className="h-3.5 w-3.5 accent-blue-500"
+        />
+        <span className="font-medium">Auto-fetch</span>
+        <span className="text-xs text-zinc-500">
+          — scheduled background <code className="text-zinc-300">git fetch --all</code>{" "}
+          on every repo, plus a fast-forward pull on repos that are clean and on
+          their default branch.
+        </span>
+      </label>
+
+      <div
+        className={`flex flex-col gap-2 pl-5 transition-opacity ${
+          draft.autoFetchEnabled ? "opacity-100" : "pointer-events-none opacity-50"
+        }`}
+      >
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-zinc-400">Interval</span>
+          <select
+            value={String(draft.autoFetchIntervalSec)}
+            onChange={(e) => onIntervalChange(parseInt(e.currentTarget.value, 10))}
+            disabled={!draft.autoFetchEnabled}
+            className="rounded border border-border bg-surface-3 px-2 py-1.5 text-sm text-zinc-100 focus:border-blue-400 focus:outline-none"
+          >
+            {INTERVAL_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {showAnchor && (
+          <div className="flex gap-2">
+            {showDow && (
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-400">Day</span>
+                <select
+                  value={String(draft.autoFetchAnchorDow ?? 1)}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      autoFetchAnchorDow: parseInt(e.currentTarget.value, 10),
+                    })
+                  }
+                  disabled={!draft.autoFetchEnabled}
+                  className="rounded border border-border bg-surface-3 px-2 py-1.5 text-sm text-zinc-100 focus:border-blue-400 focus:outline-none"
+                >
+                  <option value="1">Monday</option>
+                  <option value="2">Tuesday</option>
+                  <option value="3">Wednesday</option>
+                  <option value="4">Thursday</option>
+                  <option value="5">Friday</option>
+                  <option value="6">Saturday</option>
+                  <option value="0">Sunday</option>
+                </select>
+              </label>
+            )}
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-xs font-medium text-zinc-400">
+                Time (UTC)
+              </span>
+              <input
+                type="time"
+                value={timeValue}
+                onChange={(e) => onTimeChange(e.currentTarget.value)}
+                disabled={!draft.autoFetchEnabled}
+                className="rounded border border-border bg-surface-3 px-2 py-1.5 text-sm text-zinc-100 focus:border-blue-400 focus:outline-none"
+              />
+            </label>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-zinc-500">
+            Schedule: {describeSchedule(draft)}. Last run:{" "}
+            {timeAgo(draft.autoFetchLastRunAt)}.
+          </span>
+          <Button
+            icon={
+              runBusy ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <RefreshCw size={12} />
+              )
+            }
+            onClick={runNow}
+            disabled={runBusy}
+            className="h-7 px-2 text-xs"
+          >
+            Run now
+          </Button>
+        </div>
+        {runError && (
+          <span className="text-xs text-red-300" title={runError}>
+            {runError}
+          </span>
+        )}
+        <span className="text-[11px] text-zinc-500">
+          Dirty repos are fetch-only (never overwritten). Off-default branches
+          get refs updated but no pull. Never force-pushes, never discards
+          commits.
+        </span>
+      </div>
+    </div>
+  );
 }
 
 function PushModeOption({
