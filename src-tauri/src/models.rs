@@ -259,13 +259,18 @@ pub struct BulkPullReport {
 /// the backend validates the shape before it lands in the settings table
 /// (see `commands::settings::validate_cli_actions`). `slash_command` must
 /// start with `/` and contain only whitelisted characters — no shell
-/// metacharacters can reach the terminal launcher.
+/// metacharacters can reach the terminal launcher. `model`, if set, is
+/// an allowlisted alias (`haiku` | `sonnet` | `opus`) that becomes a
+/// `--model <alias>` flag on the `claude` invocation; `None` launches
+/// with the CLI's own default.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliAction {
     pub id: String,
     pub label: String,
     #[serde(rename = "slashCommand")]
     pub slash_command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

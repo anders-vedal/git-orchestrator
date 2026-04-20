@@ -22,6 +22,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { useUiStore } from "../../stores/uiStore";
 import type {
   CliAction,
+  CliActionModel,
   IgnoredPath,
   PushModePref,
   Settings,
@@ -147,11 +148,15 @@ export function SettingsDialog() {
       // empty slash command, and blank rows are a natural "deleted by
       // clearing fields" gesture.
       const cleaned: CliAction[] = draft.cliActions
-        .map((a) => ({
-          id: a.id,
-          label: a.label.trim(),
-          slashCommand: a.slashCommand.trim(),
-        }))
+        .map((a) => {
+          const entry: CliAction = {
+            id: a.id,
+            label: a.label.trim(),
+            slashCommand: a.slashCommand.trim(),
+          };
+          if (a.model) entry.model = a.model;
+          return entry;
+        })
         .filter((a) => a.label !== "" && a.slashCommand !== "");
       await update({ ...draft, cliActions: cleaned });
       close();
@@ -367,6 +372,22 @@ export function SettingsDialog() {
                     maxLength={128}
                     className="flex-1 rounded border border-border bg-surface-3 px-2 py-1 font-mono text-sm text-zinc-100 focus:border-blue-400 focus:outline-none"
                   />
+                  <select
+                    value={a.model ?? ""}
+                    onChange={(e) => {
+                      const v = e.currentTarget.value;
+                      updateAction(a.id, {
+                        model: v === "" ? undefined : (v as CliActionModel),
+                      });
+                    }}
+                    title="Claude model (optional). Launches with --model <alias>."
+                    className="w-24 rounded border border-border bg-surface-3 px-2 py-1 text-sm text-zinc-100 focus:border-blue-400 focus:outline-none"
+                  >
+                    <option value="">Default</option>
+                    <option value="haiku">Haiku</option>
+                    <option value="sonnet">Sonnet</option>
+                    <option value="opus">Opus</option>
+                  </select>
                   <IconButton
                     title="Remove this action"
                     tone="danger"
@@ -382,7 +403,9 @@ export function SettingsDialog() {
           <span className="text-[11px] text-zinc-500">
             Each action launches{" "}
             <code className="text-zinc-300">claude &quot;&lt;slash-command&gt;&quot;</code>{" "}
-            in a new terminal. Only letters, digits, and{" "}
+            in a new terminal (with{" "}
+            <code className="text-zinc-300">--model &lt;alias&gt;</code> if a
+            model is picked; Default omits the flag). Only letters, digits, and{" "}
             <code className="text-zinc-300">/ - _ . , : space = + @</code>{" "}
             are allowed in slash commands — shell metacharacters are rejected.
           </span>

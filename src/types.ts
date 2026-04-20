@@ -231,16 +231,26 @@ export type TerminalPref =
 export type ThemePref = "dark" | "light" | "system";
 
 /**
+ * Model alias passed through to `claude --model <alias>`. Kept to short
+ * aliases so the user doesn't have to chase model-ID churn. `undefined`
+ * means "no flag" — the CLI picks its own default.
+ */
+export type CliActionModel = "haiku" | "sonnet" | "opus";
+export const CLI_ACTION_MODELS: CliActionModel[] = ["haiku", "sonnet", "opus"];
+
+/**
  * A user-configured Claude Code launcher entry. Backend persists the list
  * as a JSON-encoded string under the `cli_actions` setting and enforces
  * the whitelist (`slashCommand` must start with `/` and may only contain
- * safe characters) before the value lands in SQLite. See
+ * safe characters, `model` must be one of the allowlisted aliases) before
+ * the value lands in SQLite. See
  * `src-tauri/src/commands/settings.rs::validate_cli_actions`.
  */
 export interface CliAction {
   id: string;
   label: string;
   slashCommand: string;
+  model?: CliActionModel;
 }
 
 export type SortByPref =

@@ -19,8 +19,12 @@ pub async fn run_cli_action(id: i64, action_id: String) -> Result<(), String> {
     // `slash_command` is whitelisted server-side (no quotes, backticks, `$`,
     // `;`, `&`, `|`, newlines, etc.). Wrapping in double quotes groups any
     // embedded spaces (e.g. `/task start NOR-123`) into a single argv entry
-    // for `claude`.
-    let command_line = format!("claude \"{}\"", action.slash_command);
+    // for `claude`. `model` is allowlisted to short aliases so the flag
+    // arg needs no quoting either.
+    let command_line = match &action.model {
+        Some(m) => format!("claude --model {} \"{}\"", m, action.slash_command),
+        None => format!("claude \"{}\"", action.slash_command),
+    };
     system::launch_terminal_in_repo_with_command(id, &command_line).await
 }
 

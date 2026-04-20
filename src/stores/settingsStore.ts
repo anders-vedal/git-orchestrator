@@ -77,7 +77,18 @@ function asCliActions(v: string | undefined): CliAction[] {
         typeof item.label === "string" &&
         typeof item.slashCommand === "string"
       ) {
-        ok.push({ id: item.id, label: item.label, slashCommand: item.slashCommand });
+        const entry: CliAction = {
+          id: item.id,
+          label: item.label,
+          slashCommand: item.slashCommand,
+        };
+        if (
+          typeof item.model === "string" &&
+          (item.model === "haiku" || item.model === "sonnet" || item.model === "opus")
+        ) {
+          entry.model = item.model;
+        }
+        ok.push(entry);
       }
     }
     return ok;

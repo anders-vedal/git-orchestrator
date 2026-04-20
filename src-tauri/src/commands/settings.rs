@@ -46,6 +46,12 @@ fn slash_command_char_ok(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.' | ',' | ':' | ' ' | '=' | '+' | '@')
 }
 
+/// Allowlist of model aliases a CliAction may carry. Passed through as
+/// `claude --model <alias>`; keeping it to short aliases means the user
+/// doesn't have to chase model-ID churn, and the backend knows the
+/// composed command is safe to interpolate (no quoting needed).
+pub const ALLOWED_MODELS: &[&str] = &["haiku", "sonnet", "opus"];
+
 /// Server-side validation for the `cli_actions` setting. Runs before the
 /// value lands in SQLite so invariant #12 holds even if the renderer is
 /// compromised: only well-shaped actions with safe slash commands can be
@@ -95,6 +101,15 @@ pub fn validate_cli_actions(value: &str) -> Result<(), String> {
                 return Err(format!(
                     "cli_actions[{idx}].slashCommand contains disallowed character {c:?}. \
                      Only letters, digits, / - _ . , : space = + @ are allowed."
+                ));
+            }
+        }
+        if let Some(model) = &a.model {
+            if !ALLOWED_MODELS.contains(&model.as_str()) {
+                return Err(format!(
+                    "cli_actions[{idx}].model {model:?} is not allowed. \
+                     Allowed values: {}.",
+                    ALLOWED_MODELS.join(", ")
                 ));
             }
         }
@@ -187,5 +202,34 @@ mod tests {
     fn rejects_malformed_json() {
         assert!(validate_cli_actions("{not json}").is_err());
         assert!(validate_cli_actions(r#"{"id":"x"}"#).is_err()); // object, not array
+    }
+
+    #[test]
+    fn accepts_entry_without_model() {
+        let v = r#"[{"id":"ship","label":"Ship","slashCommand":"/ship"}]"#;
+        assert!(validate_cli_actions(v).is_ok());
+    }
+
+    #[test]
+    fn accepts_allowed_models() {
+        for m in ["haiku", "sonnet", "opus"] {
+            let v = format!(
+                r#"[{{"id":"ship","label":"Ship","slashCommand":"/ship","model":"{m}"}}]"#
+            );
+            assert!(validate_cli_actions(&v).is_ok(), "should accept model={m}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_model() {
+        for bad in ["gpt-4", "claude-opus-4-7", "HAIKU", "", "haiku-latest"] {
+            let v = format!(
+                r#"[{{"id":"ship","label":"Ship","slashCommand":"/ship","model":"{bad}"}}]"#
+            );
+            assert!(
+                validate_cli_actions(&v).is_err(),
+                "should reject model={bad:?}"
+            );
+        }
     }
 }
