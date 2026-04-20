@@ -125,6 +125,17 @@ const MIGRATIONS: &[(&str, &str)] = &[
         ON stash_entries(bundle_id);
     "#,
     ),
+    (
+        // Push mode: per-repo override for commit&push behaviour. NULL =
+        // inherit the global `push_mode` setting ("direct" or "pr"). When
+        // "pr", commit&push creates a new branch from the default branch
+        // instead of pushing straight to it — useful for repos whose main
+        // is branch-protected.
+        "007_repo_push_mode",
+        r#"
+    ALTER TABLE repos ADD COLUMN push_mode TEXT;
+    "#,
+    ),
 ];
 
 pub fn apply(conn: &Connection) -> Result<(), rusqlite::Error> {

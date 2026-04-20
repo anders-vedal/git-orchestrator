@@ -1,8 +1,25 @@
 use crate::db;
 use crate::git::runner::is_git_repo;
-use crate::models::Repo;
+use crate::models::{PushModeInfo, Repo};
 use crate::util::normalize_path;
 use std::path::{Path, PathBuf};
+
+/// Resolve the effective push mode for a repo: per-repo override, else
+/// global setting, else "direct". Used by both `get_push_mode_info` and
+/// `git_commit_push` so they never disagree.
+pub(crate) fn resolve_effective_push_mode(
+    repo_override: Option<&str>,
+    global: Option<&str>,
+) -> String {
+    for candidate in [repo_override, global] {
+        if let Some(v) = candidate {
+            if v == "direct" || v == "pr" {
+                return v.to_string();
+            }
+        }
+    }
+    "direct".to_string()
+}
 
 pub(crate) fn canonical(path: &str) -> Result<PathBuf, String> {
     // On Windows, reject UNC/network paths before anything touches the
@@ -99,4 +116,40 @@ pub async fn rename_repo(id: i64, new_name: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn reorder_repos(ordered_ids: Vec<i64>) -> Result<(), String> {
     db::with_conn_mut(|c| crate::db::queries::reorder(c, &ordered_ids))
+}
+
+/// Set or clear the per-repo push_mode override. Accepts "direct", "pr",
+/// or null. Anything else is rejected so a compromised renderer can't
+/// stuff arbitrary strings into the column (invariant #12 style).
+#[tauri::command]
+pub async fn set_repo_push_mode(id: i64, mode: Option<String>) -> Result<(), String> {
+    let validated = match mode.as_deref() {
+        None => None,
+        Some("direct") => Some("direct"),
+        Some("pr") => Some("pr"),
+        Some(other) => {
+            return Err(format!(
+                "refused: push_mode must be 'direct', 'pr', or null (got {other:?})"
+            ));
+        }
+    };
+    db::with_conn(|c| crate::db::queries::set_repo_push_mode(c, id, validated))
+}
+
+/// Return both the per-repo override and the effective resolved value
+/// (override → global setting → "direct"). The kebab menu uses `override`
+/// to show the current radio selection; the commit dialog uses
+/// `effective` to decide whether to render the branch-name field.
+#[tauri::command]
+pub async fn get_push_mode_info(id: i64) -> Result<PushModeInfo, String> {
+    db::with_conn(|c| {
+        let repo = crate::db::queries::find_repo(c, id)?;
+        let global = crate::db::queries::get_setting(c, "push_mode")?;
+        let effective =
+            resolve_effective_push_mode(repo.push_mode.as_deref(), global.as_deref());
+        Ok(PushModeInfo {
+            override_: repo.push_mode,
+            effective,
+        })
+    })
 }

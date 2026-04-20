@@ -815,6 +815,8 @@ pub async fn git_commit_push(
             pushed: false,
             upstream_set: false,
             push_output: String::new(),
+            branch_created: false,
+            pr_url: None,
         };
 
         // 4. Push (opt-in). We only surface the outcome — a failure here

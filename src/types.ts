@@ -6,6 +6,23 @@ export interface Repo {
   path: string;
   priority: number;
   addedAt: string;
+  /**
+   * Per-repo override for commit&push behaviour. `null` / undefined
+   * inherits the global `push_mode` setting. Migration 007.
+   */
+  pushMode?: PushModePref | null;
+}
+
+export type PushModePref = "direct" | "pr";
+
+/**
+ * Combined push-mode view for a single repo. `override` reflects the
+ * per-repo column; `effective` is what the backend will use for the
+ * next commit&push (override → global setting → "direct").
+ */
+export interface PushModeInfo {
+  override: PushModePref | null;
+  effective: PushModePref;
 }
 
 export interface Commit {
@@ -79,6 +96,11 @@ export interface CommitPushResult {
   pushed: boolean;
   upstreamSet: boolean;
   pushOutput: string;
+  /** True when the flow created a new branch (PR mode). */
+  branchCreated: boolean;
+  /** Provider compare URL (GitHub/GitLab/Azure/Bitbucket) when PR mode
+   *  pushed a new branch and the origin is a recognised host. */
+  prUrl: string | null;
 }
 
 export interface DirtyBreakdown {
@@ -238,6 +260,14 @@ export interface Settings {
   cliActions: CliAction[];
   sortBy: SortByPref;
   dimCleanRows: boolean;
+  /**
+   * Default commit&push behaviour. `direct` pushes to the current branch
+   * (original behaviour). `pr` creates a new branch from default and
+   * pushes that so a PR can be opened against main — the right choice
+   * when main is branch-protected. Per-repo overrides live on
+   * `repos.push_mode`.
+   */
+  pushMode: PushModePref;
 }
 
 export const DEFAULT_CLI_ACTIONS: CliAction[] = [
@@ -254,6 +284,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cliActions: DEFAULT_CLI_ACTIONS,
   sortBy: "attention",
   dimCleanRows: true,
+  pushMode: "direct",
 };
 
 export interface SignInResult {

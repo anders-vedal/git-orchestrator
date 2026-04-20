@@ -15,6 +15,7 @@ const ALLOWED_KEYS: &[&str] = &[
     "cli_actions",
     "sort_by",
     "dim_clean_rows",
+    "push_mode",
 ];
 
 fn ensure_allowed(key: &str) -> Result<(), String> {

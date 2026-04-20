@@ -8,6 +8,25 @@ pub struct Repo {
     pub priority: i64,
     #[serde(rename = "addedAt")]
     pub added_at: String,
+    /// Per-repo override for commit&push behaviour — "direct", "pr", or
+    /// None to inherit the global `push_mode` setting. Migration 007.
+    #[serde(rename = "pushMode")]
+    pub push_mode: Option<String>,
+}
+
+/// Combined push-mode view returned by `get_push_mode_info`. The kebab
+/// menu needs the override to show the current selection; the commit
+/// dialog needs the effective mode to decide whether to show a branch
+/// name field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushModeInfo {
+    /// The per-repo override stored on `repos.push_mode`. None = inherit.
+    #[serde(rename = "override")]
+    pub override_: Option<String>,
+    /// What the backend will actually use for this repo's next commit&push
+    /// call — override if set, otherwise the global setting, otherwise
+    /// "direct".
+    pub effective: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -148,6 +167,11 @@ pub struct ForcePullPreview {
 /// Outcome of the opt-in commit-and-push flow. Commit and push are
 /// reported independently so a successful commit isn't hidden by a
 /// push failure (credentials, non-fast-forward, offline).
+///
+/// In PR mode (see `git_commit_push` push_mode param), `branch` carries
+/// the newly-created branch name rather than the branch the user was on,
+/// `branch_created` is true, and `pr_url` may contain a compare URL for
+/// the host (GitHub/GitLab/Azure/Bitbucket).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitPushResult {
     pub branch: String,
@@ -167,6 +191,16 @@ pub struct CommitPushResult {
     pub upstream_set: bool,
     #[serde(rename = "pushOutput")]
     pub push_output: String,
+    /// True when this flow created a new branch (PR mode). False in the
+    /// direct-push flow and when PR mode fell through to a direct push
+    /// because the user wasn't on the default branch.
+    #[serde(rename = "branchCreated")]
+    pub branch_created: bool,
+    /// Provider compare/PR-create URL, when we could compute one for the
+    /// repo's remote host and we successfully pushed the branch. Clients
+    /// open this in the browser to finish opening a pull request.
+    #[serde(rename = "prUrl")]
+    pub pr_url: Option<String>,
 }
 
 /// Result of a force-pull, with the info needed to render a reflog-rescue
