@@ -406,6 +406,30 @@ export function SettingsDialog() {
         </label>
 
         <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-zinc-400">
+            Dashboard display
+          </span>
+          <label
+            className="flex items-center gap-2 text-sm text-zinc-200"
+            title="Fade out repos that are clean, up-to-date, and on their default branch so the eye lands on anything that needs attention. Hover or focus restores full opacity."
+          >
+            <input
+              type="checkbox"
+              checked={draft.dimCleanRows}
+              onChange={(e) =>
+                setDraft({ ...draft, dimCleanRows: e.currentTarget.checked })
+              }
+              className="h-3.5 w-3.5 accent-blue-500"
+            />
+            Dim clean + up-to-date rows
+          </label>
+          <span className="text-[11px] text-zinc-500">
+            Default sort is “Attention” — errors and diverged repos float to
+            the top. Change in the toolbar above the repo list.
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-zinc-400">Updates</span>
           <label className="flex items-center gap-2 text-sm text-zinc-200">
             <input

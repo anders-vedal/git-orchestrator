@@ -221,6 +221,13 @@ export interface CliAction {
   slashCommand: string;
 }
 
+export type SortByPref =
+  | "attention"
+  | "custom"
+  | "name"
+  | "latest"
+  | "commits";
+
 export interface Settings {
   terminal: TerminalPref;
   refreshIntervalSec: number;
@@ -229,6 +236,8 @@ export interface Settings {
   bulkConcurrency: number;
   autoCheckUpdates: boolean;
   cliActions: CliAction[];
+  sortBy: SortByPref;
+  dimCleanRows: boolean;
 }
 
 export const DEFAULT_CLI_ACTIONS: CliAction[] = [
@@ -243,6 +252,8 @@ export const DEFAULT_SETTINGS: Settings = {
   bulkConcurrency: 4,
   autoCheckUpdates: true,
   cliActions: DEFAULT_CLI_ACTIONS,
+  sortBy: "attention",
+  dimCleanRows: true,
 };
 
 export interface SignInResult {

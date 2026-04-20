@@ -15,9 +15,10 @@ import { Folders, SearchX } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import {
   applyFilterSort,
-  isFilterActive,
+  isCustomOrderView,
   useFilterStore,
 } from "../stores/filterStore";
+import { useFocusStore } from "../stores/focusStore";
 import { useReposStore } from "../stores/reposStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { RepoRow } from "./RepoRow";
@@ -35,44 +36,26 @@ export function RepoList() {
   const reset = useFilterStore((s) => s.reset);
 
   const selectionCount = useSelectionStore((s) => s.selectedIds.size);
-  const clearSelection = useSelectionStore((s) => s.clear);
-  const toggleAllVisible = useSelectionStore((s) => s.toggleAllVisible);
+  const setVisibleIdsFocus = useFocusStore((s) => s.setVisibleIds);
 
   const visible = useMemo(
     () => applyFilterSort(statuses, search, sortBy, sortDir, filter),
     [statuses, search, sortBy, sortDir, filter],
   );
   const visibleIds = useMemo(() => visible.map((s) => s.id), [visible]);
-  const filtersActive = isFilterActive(search, sortBy, filter);
-  // Drag is disabled when filters hide rows (reordering the full list
-  // through a partial view is incoherent) OR when 2+ rows are selected
-  // (drag-one-of-many semantics are ambiguous — clear selection first).
-  const dragEnabled = !filtersActive && selectionCount < 2;
+  // Drag-to-reorder only works when the visible list equals the full
+  // list in stored priority order. Any sort (attention, name, etc.),
+  // any search, or any filter breaks that invariant. Multi-selection
+  // also makes drag-one-of-many semantics ambiguous, so we require < 2.
+  const dragEnabled =
+    isCustomOrderView(search, sortBy, filter) && selectionCount < 2;
 
-  // Global keyboard: Ctrl/Cmd+A to toggle-all-visible, Esc to clear.
-  // Skipped when focus is in an input so typing in the search box etc.
-  // doesn't hijack selection.
+  // Keep the focus store in sync with the visible, ordered row ids so
+  // j/k/Home/End can navigate deterministically across filter changes.
+  // The Esc cascade + Ctrl/Cmd+A now live in useGlobalKeymap.
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName;
-      const isTyping =
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        target?.isContentEditable === true;
-      if (isTyping) return;
-
-      if (e.key === "Escape" && selectionCount > 0) {
-        e.preventDefault();
-        clearSelection();
-      } else if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
-        e.preventDefault();
-        toggleAllVisible(visibleIds);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selectionCount, clearSelection, toggleAllVisible, visibleIds]);
+    setVisibleIdsFocus(visibleIds);
+  }, [visibleIds, setVisibleIdsFocus]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),

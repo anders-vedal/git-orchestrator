@@ -1,61 +1,55 @@
+import clsx from "clsx";
 import {
-  Download,
   ArrowDownToLine,
-  AlertOctagon,
-  FolderOpen,
-  TerminalSquare,
-  Globe,
   ChevronDown,
   ChevronUp,
+  CornerUpLeft,
+  Download,
   GitCommitHorizontal,
   Loader2,
-  Sparkles,
+  TerminalSquare,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState, type ReactNode } from "react";
 import * as api from "../lib/tauri";
+import {
+  resolvePrimaryAction,
+  type PrimaryAction,
+} from "../lib/repoActionsResolver";
 import { useReposStore } from "../stores/reposStore";
-import { useSettingsStore } from "../stores/settingsStore";
 import { useUiStore } from "../stores/uiStore";
-import type { CliAction, RepoStatus } from "../types";
+import type { RepoStatus } from "../types";
+import { RepoKebabMenu, type RunOpts } from "./RepoKebabMenu";
 import { IconButton } from "./ui/Button";
 
 interface Props {
   status: RepoStatus;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onRename: () => void;
+  onRemove: () => void;
 }
 
-export function RepoActions({ status }: Props) {
+export function RepoActions({
+  status,
+  refreshing,
+  onRefresh,
+  onRename,
+  onRemove,
+}: Props) {
   const [busy, setBusy] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const refreshOne = useReposStore((s) => s.refreshOne);
   const openDialog = useUiStore((s) => s.openDialog);
   const toggleExpanded = useUiStore((s) => s.toggleExpanded);
   const isExpanded = useUiStore((s) => s.expandedIds.has(status.id));
-  const cliActions = useSettingsStore((s) => s.settings.cliActions);
 
   const onDefault = status.branch === status.defaultBranch;
-  const hasChanges = status.dirty !== "clean";
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onDown(e: MouseEvent) {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setMenuOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
+  const primary = resolvePrimaryAction(status);
+  const primaryBusy = primary != null && busy === primary.busyName;
 
   async function run(
     name: string,
     fn: () => Promise<unknown>,
-    opts?: { refresh?: boolean; errorTitle?: string; gitError?: boolean },
+    opts?: RunOpts,
   ) {
     setBusy(name);
     try {
@@ -81,33 +75,51 @@ export function RepoActions({ status }: Props) {
     }
   }
 
-  function runAction(action: CliAction) {
-    setMenuOpen(false);
-    void run("Claude Code", () => api.runCliAction(status.id, action.id), {
-      refresh: false,
-      gitError: false,
-      errorTitle: `Launching ${action.label} failed`,
-    });
-  }
-
-  function onClaudeClick() {
-    if (cliActions.length === 0) return;
-    if (cliActions.length === 1) {
-      runAction(cliActions[0]);
-      return;
+  function invokePrimary() {
+    if (!primary) return;
+    switch (primary.kind) {
+      case "pull":
+        void run(primary.busyName, () => api.gitPullFf(status.id));
+        return;
+      case "commitPush":
+        openDialog({
+          kind: "commitPush",
+          id: status.id,
+          name: status.name,
+          branch: status.branch,
+          defaultBranch: status.defaultBranch,
+          hasUpstream: status.hasUpstream,
+        });
+        return;
+      case "switchDefault":
+        void run(
+          primary.busyName,
+          () => api.gitCheckout(status.id, status.defaultBranch),
+          {
+            errorTitle: `Can't switch to ${status.defaultBranch}`,
+          },
+        );
+        return;
+      case "openTerminal":
+        void run(primary.busyName, () => api.openTerminal(status.id), {
+          refresh: false,
+          gitError: false,
+        });
+        return;
     }
-    setMenuOpen((v) => !v);
   }
-
-  const claudeTitle =
-    cliActions.length === 0
-      ? ""
-      : cliActions.length === 1
-        ? `Launch Claude Code with ${cliActions[0].slashCommand} in this repo — opens a new terminal, cds into the repo, and runs \`claude "${cliActions[0].slashCommand}"\``
-        : `Launch Claude Code in this repo — ${cliActions.length} actions configured, pick one`;
 
   return (
     <div className="flex items-center gap-1">
+      {primary && (
+        <PrimaryButton
+          action={primary}
+          busy={primaryBusy}
+          anyBusy={!!busy}
+          onClick={invokePrimary}
+        />
+      )}
+
       <IconButton
         title={
           "Fetch — runs `git fetch origin`. Downloads new commits and updates " +
@@ -117,154 +129,23 @@ export function RepoActions({ status }: Props) {
         onClick={() => run("Fetch", () => api.gitFetch(status.id))}
         disabled={!!busy}
       >
-        {busy === "Fetch" ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-      </IconButton>
-
-      <IconButton
-        title={
-          "Pull (fast-forward only) — runs `git pull --ff-only`. Fast-forwards " +
-          "the current branch to its upstream if possible. Refuses when the " +
-          "branch has diverged or the working tree is dirty; no merge commit is " +
-          "ever created."
-        }
-        tone="primary"
-        onClick={() => run("Pull", () => api.gitPullFf(status.id))}
-        disabled={!!busy}
-      >
-        {busy === "Pull" ? (
+        {busy === "Fetch" ? (
           <Loader2 size={16} className="animate-spin" />
         ) : (
-          <ArrowDownToLine size={16} />
+          <Download size={16} />
         )}
       </IconButton>
 
-      <IconButton
-        title={
-          hasChanges
-            ? "Commit & push — stages every change (`git add -A`), commits with a message you provide, and optionally pushes to origin. Opens a dialog with a full file preview and the exact commands before anything runs. Never uses --force."
-            : "Commit & push disabled — working tree is clean. Nothing to stage."
-        }
-        tone="primary"
-        disabled={!hasChanges || !!busy}
-        onClick={() =>
-          openDialog({
-            kind: "commitPush",
-            id: status.id,
-            name: status.name,
-            branch: status.branch,
-            defaultBranch: status.defaultBranch,
-            hasUpstream: status.hasUpstream,
-          })
-        }
-      >
-        <GitCommitHorizontal size={16} />
-      </IconButton>
-
-      <IconButton
-        title={
-          onDefault
-            ? "Force pull — fetches origin and runs `git reset --hard origin/" +
-              status.defaultBranch +
-              "`. DISCARDS any local commits and uncommitted changes on the " +
-              "current branch. A preview dialog shows exactly what will be lost " +
-              "before you confirm, and the pre-reset SHA is logged so you can Undo."
-            : `Force pull disabled — only allowed on the default branch (${status.defaultBranch}). Switch branches in your terminal first.`
-        }
-        tone="danger"
-        disabled={!onDefault || !!busy}
-        onClick={() =>
-          openDialog({
-            kind: "forcePull",
-            id: status.id,
-            name: status.name,
-            defaultBranch: status.defaultBranch,
-          })
-        }
-      >
-        <AlertOctagon size={16} />
-      </IconButton>
-
-      <div className="mx-1 h-5 w-px bg-border" />
-
-      <IconButton
-        title="Open folder in the OS file manager"
-        onClick={() =>
-          run("Open folder", () => api.openFolder(status.id), {
-            refresh: false,
-            gitError: false,
-          })
-        }
-      >
-        <FolderOpen size={16} />
-      </IconButton>
-
-      <IconButton
-        title="Open a terminal in this repo — use it to commit, push, merge, or run any other git command"
-        onClick={() =>
-          run("Open terminal", () => api.openTerminal(status.id), {
-            refresh: false,
-            gitError: false,
-          })
-        }
-      >
-        <TerminalSquare size={16} />
-      </IconButton>
-
-      {cliActions.length > 0 && (
-        <div className="relative" ref={menuRef}>
-          <IconButton
-            title={claudeTitle}
-            tone="primary"
-            onClick={onClaudeClick}
-            disabled={busy === "Claude Code"}
-          >
-            {busy === "Claude Code" ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Sparkles size={16} />
-            )}
-          </IconButton>
-          {menuOpen && cliActions.length > 1 && (
-            <div
-              role="menu"
-              className="absolute right-0 top-full z-30 mt-1 min-w-[180px] overflow-hidden rounded-md border border-border-strong bg-surface-1 shadow-xl"
-            >
-              {cliActions.map((a) => (
-                <button
-                  key={a.id}
-                  role="menuitem"
-                  onClick={() => runAction(a)}
-                  className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left text-sm text-zinc-100 hover:bg-surface-3"
-                >
-                  <span className="font-medium">{a.label}</span>
-                  <code className="font-mono text-[11px] text-zinc-400">
-                    {a.slashCommand}
-                  </code>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <IconButton
-        title={
-          status.remoteUrl
-            ? `Open remote in browser — ${status.remoteUrl}`
-            : "No remote URL — this repo has no origin remote configured"
-        }
-        disabled={!status.remoteUrl}
-        onClick={() =>
-          run("Open remote", () => api.openRemote(status.id), {
-            refresh: false,
-            gitError: false,
-          })
-        }
-      >
-        <Globe size={16} />
-      </IconButton>
-
-      <div className="mx-1 h-5 w-px bg-border" />
+      <RepoKebabMenu
+        status={status}
+        busy={busy}
+        onDefault={onDefault}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        onRename={onRename}
+        onRemove={onRemove}
+        runHelper={run}
+      />
 
       <IconButton
         title={
@@ -277,5 +158,57 @@ export function RepoActions({ status }: Props) {
         {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </IconButton>
     </div>
+  );
+}
+
+function primaryIcon(icon: PrimaryAction["icon"]): ReactNode {
+  switch (icon) {
+    case "pull":
+      return <ArrowDownToLine size={14} />;
+    case "commit":
+      return <GitCommitHorizontal size={14} />;
+    case "switchDefault":
+      return <CornerUpLeft size={14} />;
+    case "terminal":
+      return <TerminalSquare size={14} />;
+  }
+}
+
+interface PrimaryButtonProps {
+  action: PrimaryAction;
+  busy: boolean;
+  anyBusy: boolean;
+  onClick: () => void;
+}
+
+function PrimaryButton({
+  action,
+  busy,
+  anyBusy,
+  onClick,
+}: PrimaryButtonProps) {
+  const toneClasses =
+    action.tone === "primary"
+      ? "bg-blue-600 border-blue-500 hover:bg-blue-500 hover:border-blue-400 text-white"
+      : "bg-amber-500/15 border-amber-500/40 hover:bg-amber-500/25 hover:border-amber-400/60 text-amber-100";
+  return (
+    <button
+      type="button"
+      title={action.title}
+      onClick={onClick}
+      disabled={anyBusy}
+      className={clsx(
+        "inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium transition",
+        "disabled:cursor-not-allowed disabled:opacity-60 select-none",
+        toneClasses,
+      )}
+    >
+      {busy ? (
+        <Loader2 size={14} className="animate-spin" />
+      ) : (
+        primaryIcon(action.icon)
+      )}
+      <span className="whitespace-nowrap">{action.label}</span>
+    </button>
   );
 }

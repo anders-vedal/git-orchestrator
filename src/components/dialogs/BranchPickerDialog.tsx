@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Circle,
+  CornerUpLeft,
   GitBranch,
   Globe,
   Loader2,
@@ -36,6 +37,8 @@ export function BranchPickerDialog() {
   const repoName = dialog?.kind === "branchPicker" ? dialog.repoName : "";
   const currentBranch =
     dialog?.kind === "branchPicker" ? dialog.currentBranch : "";
+  const defaultBranch =
+    dialog?.kind === "branchPicker" ? dialog.defaultBranch : "";
 
   const [data, setData] = useState<BranchList | null>(null);
   const [loading, setLoading] = useState(false);
@@ -192,6 +195,7 @@ export function BranchPickerDialog() {
           filteredLocal={filteredLocal}
           filteredRemote={filteredRemote}
           currentBranch={currentBranch}
+          defaultBranch={defaultBranch}
           onReload={load}
           onCheckout={checkoutLocal}
           onFromRemote={startFromRemote}
@@ -262,6 +266,7 @@ interface PickBranchListProps {
   filteredLocal: BranchInfo[];
   filteredRemote: BranchInfo[];
   currentBranch: string;
+  defaultBranch: string;
   onReload: () => void;
   onCheckout: (name: string) => void;
   onFromRemote: (b: BranchInfo) => void;
@@ -278,11 +283,21 @@ function PickBranchList({
   filteredLocal,
   filteredRemote,
   currentBranch,
+  defaultBranch,
   onReload,
   onCheckout,
   onFromRemote,
   onStartCreate,
 }: PickBranchListProps) {
+  // Show a pinned "Switch to default" shortcut when the user isn't on the
+  // default branch AND it exists locally (the common case). If it only
+  // exists as a remote, we fall through to the normal remote-tracking
+  // flow; that path already handles the create step.
+  const defaultExistsLocal = !!(
+    defaultBranch && data?.local?.some((b) => b.name === defaultBranch)
+  );
+  const showSwitchShortcut =
+    !!defaultBranch && currentBranch !== defaultBranch && defaultExistsLocal;
   return (
     <div className="flex flex-col gap-3" style={{ maxHeight: "70vh" }}>
       <div className="flex items-center gap-2">
@@ -344,6 +359,25 @@ function PickBranchList({
           </div>
         ) : (
           <>
+            {showSwitchShortcut && (
+              <button
+                type="button"
+                onClick={() => onCheckout(defaultBranch)}
+                disabled={working !== null}
+                className="flex w-full items-center gap-2 border-b border-border bg-blue-500/10 px-3 py-2 text-left text-sm font-medium text-blue-200 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                title={`Switch to ${defaultBranch} — the default branch for this repo`}
+              >
+                {working === defaultBranch ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <CornerUpLeft size={14} />
+                )}
+                <span>
+                  Switch to default branch —{" "}
+                  <span className="font-mono">{defaultBranch}</span>
+                </span>
+              </button>
+            )}
             <SectionHeader
               icon={<GitBranch size={12} />}
               label="Local"

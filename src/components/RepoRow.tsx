@@ -3,33 +3,22 @@ import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
 import {
   AlertCircle,
-  ArrowUpFromLine,
   Boxes,
-  CheckCircle2,
-  CornerUpLeft,
-  FileWarning,
-  FilePlus,
-  FileEdit,
   GitBranch,
-  GitFork,
   GripVertical,
-  Pencil,
-  RefreshCcw,
-  Trash2,
-  Loader2,
-  MinusCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { firstLine, timeAgo, truncate } from "../lib/format";
-import * as api from "../lib/tauri";
+import { getRepoStateBucket, getRepoStateChip } from "../lib/repoState";
+import { useFocusStore } from "../stores/focusStore";
 import { useReposStore } from "../stores/reposStore";
 import { useSelectionStore } from "../stores/selectionStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { useUiStore } from "../stores/uiStore";
-import type { Dirty, RepoStatus } from "../types";
+import type { RepoStatus } from "../types";
 import { RepoActions } from "./RepoActions";
 import { RepoChangesPanel } from "./RepoChangesPanel";
 import { RepoLogPanel } from "./RepoLogPanel";
-import { IconButton } from "./ui/Button";
 import { Pill } from "./ui/Pill";
 
 interface Props {
@@ -38,54 +27,6 @@ interface Props {
   /** Ordered ids of the currently-visible rows — needed for shift+click
    *  range selection. Pass from RepoList's memoized `visible`. */
   visibleIds: number[];
-}
-
-const DIRTY_TOOLTIPS: Record<Dirty, string> = {
-  clean: "Working tree matches HEAD — no local changes.",
-  untracked:
-    "New files exist that git isn't tracking yet. They won't be pushed until `git add` + commit.",
-  unstaged:
-    "Tracked files have edits that haven't been added to the index. Run `git add` to stage them, or discard with `git restore`.",
-  staged:
-    "Changes are in the index, ready to commit. Run `git commit` to record them.",
-  mixed:
-    "A combination of staged, unstaged, and/or untracked changes — typically because some edits were staged and others came in after.",
-};
-
-function dirtyPill(dirty: Dirty) {
-  const tip = DIRTY_TOOLTIPS[dirty];
-  switch (dirty) {
-    case "clean":
-      return (
-        <Pill tone="green" icon={<CheckCircle2 size={12} />} title={tip}>
-          clean
-        </Pill>
-      );
-    case "untracked":
-      return (
-        <Pill tone="yellow" icon={<FilePlus size={12} />} title={tip}>
-          untracked
-        </Pill>
-      );
-    case "unstaged":
-      return (
-        <Pill tone="yellow" icon={<FileEdit size={12} />} title={tip}>
-          unstaged
-        </Pill>
-      );
-    case "staged":
-      return (
-        <Pill tone="blue" icon={<FileEdit size={12} />} title={tip}>
-          staged
-        </Pill>
-      );
-    case "mixed":
-      return (
-        <Pill tone="red" icon={<FileWarning size={12} />} title={tip}>
-          mixed
-        </Pill>
-      );
-  }
 }
 
 export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
@@ -97,41 +38,22 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
   const isSelected = useSelectionStore((s) => s.selectedIds.has(status.id));
   const toggleSelect = useSelectionStore((s) => s.toggle);
   const selectRange = useSelectionStore((s) => s.selectRange);
+  const isFocused = useFocusStore((s) => s.focusedRepoId === status.id);
+  const dimCleanRows = useSettingsStore((s) => s.settings.dimCleanRows);
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(status.name);
-  const [switchingToDefault, setSwitchingToDefault] = useState(false);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (isFocused && rowRef.current) {
+      rowRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [isFocused]);
 
   const onDefault =
     !!status.branch && status.branch === status.defaultBranch;
 
-  async function switchToDefault() {
-    if (
-      !status.defaultBranch ||
-      onDefault ||
-      switchingToDefault
-    )
-      return;
-    setSwitchingToDefault(true);
-    try {
-      await api.gitCheckout(status.id, status.defaultBranch);
-      await refreshOne(status.id);
-    } catch (e) {
-      const msg = String(e);
-      openDialog({
-        kind: "gitError",
-        title: `Can't switch to ${status.defaultBranch}`,
-        error: msg,
-        repoId: status.id,
-      });
-    } finally {
-      setSwitchingToDefault(false);
-    }
-  }
-
   function handleCheckboxClick(e: React.MouseEvent<HTMLInputElement>) {
-    // stopPropagation prevents the row click from also firing and
-    // collapsing/expanding the row (which it doesn't today, but guards
-    // future UX changes).
     e.stopPropagation();
     if (e.shiftKey) {
       selectRange(status.id, visibleIds);
@@ -154,43 +76,15 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
     transition,
   };
 
-  const hasUpstream = status.hasUpstream;
-  const aheadBehind = status.diverged ? (
-    <Pill
-      tone="red"
-      icon={<GitFork size={12} />}
-      title={`Branch has diverged: ${status.ahead} ahead, ${status.behind} behind. Fast-forward pull will refuse — open terminal to merge or rebase.`}
-    >
-      diverged ↑{status.ahead} ↓{status.behind}
-    </Pill>
-  ) : hasUpstream ? (
-    <div className="flex items-center gap-1 text-xs text-zinc-400">
-      <Pill
-        tone={status.ahead > 0 ? "blue" : "neutral"}
-        title="Commits ahead of upstream"
-      >
-        ↑ {status.ahead}
-      </Pill>
-      <Pill
-        tone={status.behind > 0 ? "yellow" : "neutral"}
-        title="Commits behind upstream"
-      >
-        ↓ {status.behind}
-      </Pill>
-    </div>
-  ) : status.unpushedNoUpstream !== null && status.unpushedNoUpstream > 0 ? (
-    <Pill
-      tone="yellow"
-      icon={<ArrowUpFromLine size={12} />}
-      title={`${status.unpushedNoUpstream} commit(s) on this branch are not on origin/${status.defaultBranch}. No upstream is configured — push manually or set upstream.`}
-    >
-      {status.unpushedNoUpstream} unpushed
-    </Pill>
-  ) : (
-    <Pill tone="neutral" icon={<MinusCircle size={12} />} title="No upstream configured">
-      no upstream
-    </Pill>
-  );
+  const stateChip = getRepoStateChip(status);
+  // Dim rows that need no attention — clean + up-to-date + on default
+  // branch. Hover / focus / selection restore full opacity so the row
+  // is always interactable; the dim is a scanning aid, not a lock.
+  const shouldDim =
+    dimCleanRows &&
+    getRepoStateBucket(status) === "clean" &&
+    !isSelected &&
+    !isFocused;
 
   async function commitRename() {
     const trimmed = nameDraft.trim();
@@ -213,11 +107,16 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node);
+        rowRef.current = node;
+      }}
       style={style}
       className={clsx(
-        "border-b border-border bg-surface-1",
+        "border-b border-border bg-surface-1 transition-opacity",
+        shouldDim && "opacity-60 hover:opacity-100 focus-within:opacity-100",
         isSelected && "bg-blue-500/[0.06] border-l-2 border-l-blue-400 pl-0",
+        isFocused && "ring-1 ring-inset ring-blue-400/60",
         isDragging && "repo-row--dragging",
       )}
     >
@@ -231,24 +130,20 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
           title="Select this repo for bulk actions (shift+click to range-select, Esc to clear)"
           aria-label={`Select ${status.name}`}
         />
-        <button
-          className={clsx(
-            "mt-1.5 rounded p-1 text-zinc-500 hover:text-zinc-300",
-            dragDisabled
-              ? "cursor-not-allowed opacity-40 hover:bg-transparent hover:text-zinc-500"
-              : "cursor-grab hover:bg-surface-3 active:cursor-grabbing",
-          )}
-          title={
-            dragDisabled
-              ? "Reorder is disabled while a filter, search, sort, or multi-selection is active"
-              : "Drag to reorder"
-          }
-          disabled={dragDisabled}
-          {...(dragDisabled ? {} : attributes)}
-          {...(dragDisabled ? {} : listeners)}
-        >
-          <GripVertical size={16} />
-        </button>
+        {dragDisabled ? (
+          // Keep the column width so selected rows don't shift horizontally
+          // when sort/filter/selection is active and drag is off.
+          <span className="mt-1.5 block h-5 w-5" aria-hidden="true" />
+        ) : (
+          <button
+            className="mt-1.5 cursor-grab rounded p-1 text-zinc-500 hover:bg-surface-3 hover:text-zinc-300 active:cursor-grabbing"
+            title="Drag to reorder"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical size={16} />
+          </button>
+        )}
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -270,7 +165,7 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
             ) : (
               <button
                 className="truncate text-left text-sm font-semibold text-zinc-100 hover:text-blue-300"
-                title="Click to rename"
+                title={`${status.name}\n${status.path}\nClick to rename.`}
                 onClick={() => setIsEditingName(true)}
               >
                 {status.name}
@@ -295,7 +190,7 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
                   ? "No branch — repo may be unborn or detached"
                   : onDefault
                     ? `On default branch (${status.defaultBranch}) — click to switch`
-                    : `On ${status.branch} — NOT the default branch (${status.defaultBranch}). Click to open the branch picker.`
+                    : `On ${status.branch} — NOT the default branch (${status.defaultBranch}). Click to switch back or pick another branch.`
               }
               className={clsx(
                 "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60",
@@ -307,47 +202,29 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
               <GitBranch size={12} />
               <span className="font-mono">{status.branch || "—"}</span>
             </button>
-            {status.branch &&
-              status.defaultBranch &&
-              !onDefault && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void switchToDefault();
-                  }}
-                  disabled={switchingToDefault}
-                  title={`Switch to default branch (${status.defaultBranch}) — runs \`git checkout ${status.defaultBranch}\`. Refused by git if local changes would be overwritten; stash or commit first.`}
-                  className="inline-flex items-center gap-1 rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-200 hover:border-blue-400/60 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {switchingToDefault ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <CornerUpLeft size={12} />
-                  )}
-                  <span className="font-mono">{status.defaultBranch}</span>
-                </button>
-              )}
-            {dirtyPill(status.dirty)}
-            {status.hasSubmodules && (
-              <Pill
-                tone="neutral"
-                icon={<Boxes size={12} />}
-                title="Repo has submodules — dashboard shows the parent state only, submodule drift is not detected"
-              >
-                submodules
+            {stateChip && (
+              <Pill tone={stateChip.tone} title={stateChip.title}>
+                {stateChip.label}
               </Pill>
             )}
-            {aheadBehind}
+            {status.hasSubmodules && (
+              <span
+                title="Repo has submodules — dashboard shows the parent state only, submodule drift is not detected"
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border bg-surface-3 text-zinc-400"
+                aria-label="Has submodules"
+              >
+                <Boxes size={11} />
+              </span>
+            )}
             {status.error && (
-              <Pill tone="red" icon={<AlertCircle size={12} />} title={status.error}>
+              <Pill
+                tone="red"
+                icon={<AlertCircle size={12} />}
+                title={status.error}
+              >
                 error
               </Pill>
             )}
-          </div>
-
-          <div className="mt-1 truncate text-xs text-zinc-500" title={status.path}>
-            {status.path}
           </div>
 
           {status.latestCommit && (
@@ -355,11 +232,16 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
               <span className="font-mono text-zinc-400">
                 {status.latestCommit.shaShort}
               </span>
-              <span className="truncate text-zinc-300" title={status.latestCommit.message}>
+              <span
+                className="truncate text-zinc-300"
+                title={status.latestCommit.message}
+              >
                 {truncate(firstLine(status.latestCommit.message), 90)}
               </span>
               <span className="text-zinc-500">·</span>
-              <span title={status.latestCommit.author}>{status.latestCommit.author}</span>
+              <span title={status.latestCommit.author}>
+                {status.latestCommit.author}
+              </span>
               <span className="text-zinc-500">·</span>
               <span title={status.latestCommit.timestamp}>
                 {timeAgo(status.latestCommit.timestamp)}
@@ -368,66 +250,60 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
           )}
 
           {status.error && (
-            <div className="mt-1 text-xs text-red-300" title={status.error}>
+            <div
+              className="mt-1 text-xs text-red-300"
+              title={status.error}
+            >
               {truncate(status.error, 180)}
             </div>
           )}
-
-          <div className="mt-1 flex items-center gap-3 text-[11px] text-zinc-500">
-            <span>Last fetch: {timeAgo(status.lastFetch)}</span>
-            {status.lastRefreshedAt && (
-              <span
-                className="text-zinc-600"
-                title="When the dashboard last re-read this repo's git state from disk (no network)"
-              >
-                · refreshed {timeAgo(status.lastRefreshedAt)}
-              </span>
-            )}
-          </div>
         </div>
 
         <div className="flex flex-col items-end gap-2">
-          <RepoActions status={status} />
-          <div className="flex items-center gap-1">
-            <IconButton
-              title="Refresh status — re-reads branch, dirty state, and ahead/behind from disk. No network."
-              onClick={() => refreshOne(status.id)}
-              disabled={refreshing}
-            >
-              {refreshing ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <RefreshCcw size={14} />
-              )}
-            </IconButton>
-            <IconButton
-              title="Rename in the dashboard — changes the display name only; the folder on disk is not renamed"
-              onClick={() => setIsEditingName(true)}
-            >
-              <Pencil size={14} />
-            </IconButton>
-            <IconButton
-              title="Remove from dashboard — unregisters this repo. Your files on disk are NOT deleted."
-              tone="danger"
-              onClick={() =>
-                openDialog({
-                  kind: "removeRepo",
-                  id: status.id,
-                  name: status.name,
-                  path: status.path,
-                })
-              }
-            >
-              <Trash2 size={14} />
-            </IconButton>
-          </div>
+          <RepoActions
+            status={status}
+            refreshing={refreshing}
+            onRefresh={() => refreshOne(status.id)}
+            onRename={() => setIsEditingName(true)}
+            onRemove={() =>
+              openDialog({
+                kind: "removeRepo",
+                id: status.id,
+                name: status.name,
+                path: status.path,
+              })
+            }
+          />
         </div>
       </div>
 
       {isExpanded && (
         <>
+          <RepoMetadataFooter status={status} />
           {status.dirty !== "clean" && <RepoChangesPanel status={status} />}
           <RepoLogPanel status={status} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function RepoMetadataFooter({ status }: { status: RepoStatus }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border bg-surface-0 px-4 py-1.5 text-[11px] text-zinc-500">
+      <span className="truncate font-mono" title={status.path}>
+        {status.path}
+      </span>
+      <span className="text-zinc-600">·</span>
+      <span>Last fetch: {timeAgo(status.lastFetch)}</span>
+      {status.lastRefreshedAt && (
+        <>
+          <span className="text-zinc-600">·</span>
+          <span
+            title="When the dashboard last re-read this repo's git state from disk (no network)"
+          >
+            refreshed {timeAgo(status.lastRefreshedAt)}
+          </span>
         </>
       )}
     </div>

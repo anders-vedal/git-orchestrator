@@ -80,17 +80,22 @@ interface UiState {
   expandedIds: Set<number>;
   dialog: DialogKind;
   bulkInProgress: boolean;
+  paletteOpen: boolean;
   toggleExpanded: (id: number) => void;
   collapse: (id: number) => void;
   openDialog: (d: NonNullable<DialogKind>) => void;
   closeDialog: () => void;
   setBulkInProgress: (v: boolean) => void;
+  openPalette: () => void;
+  closePalette: () => void;
+  togglePalette: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
   expandedIds: new Set<number>(),
   dialog: null,
   bulkInProgress: false,
+  paletteOpen: false,
 
   toggleExpanded(id) {
     set((state) => {
@@ -117,5 +122,14 @@ export const useUiStore = create<UiState>((set) => ({
   },
   setBulkInProgress(v) {
     set({ bulkInProgress: v });
+  },
+  openPalette() {
+    set({ paletteOpen: true });
+  },
+  closePalette() {
+    set({ paletteOpen: false });
+  },
+  togglePalette() {
+    set((s) => ({ paletteOpen: !s.paletteOpen }));
   },
 }));

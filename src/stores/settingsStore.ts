@@ -5,6 +5,7 @@ import {
   DEFAULT_SETTINGS,
   type CliAction,
   type Settings,
+  type SortByPref,
   type TerminalPref,
   type ThemePref,
 } from "../types";
@@ -39,6 +40,19 @@ function clamp(n: number, min: number, max: number) {
 function asBool(v: string | undefined, fallback: boolean): boolean {
   if (v === undefined) return fallback;
   return v === "1" || v === "true";
+}
+
+function asSortBy(v: string | undefined): SortByPref {
+  if (
+    v === "custom" ||
+    v === "name" ||
+    v === "latest" ||
+    v === "commits" ||
+    v === "attention"
+  ) {
+    return v;
+  }
+  return DEFAULT_SETTINGS.sortBy;
 }
 
 function asCliActions(v: string | undefined): CliAction[] {
@@ -85,6 +99,8 @@ function hydrate(raw: Record<string, string>): Settings {
       DEFAULT_SETTINGS.autoCheckUpdates,
     ),
     cliActions: asCliActions(raw.cli_actions),
+    sortBy: asSortBy(raw.sort_by),
+    dimCleanRows: asBool(raw.dim_clean_rows, DEFAULT_SETTINGS.dimCleanRows),
   };
 }
 
@@ -96,6 +112,8 @@ const KEY_MAP: Record<keyof Settings, string> = {
   bulkConcurrency: "bulk_concurrency",
   autoCheckUpdates: "auto_check_updates",
   cliActions: "cli_actions",
+  sortBy: "sort_by",
+  dimCleanRows: "dim_clean_rows",
 };
 
 /** Keys whose DB value is a JSON-encoded blob rather than a scalar. */

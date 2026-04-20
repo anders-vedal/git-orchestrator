@@ -13,6 +13,8 @@ const ALLOWED_KEYS: &[&str] = &[
     "bulk_concurrency",
     "auto_check_updates",
     "cli_actions",
+    "sort_by",
+    "dim_clean_rows",
 ];
 
 fn ensure_allowed(key: &str) -> Result<(), String> {

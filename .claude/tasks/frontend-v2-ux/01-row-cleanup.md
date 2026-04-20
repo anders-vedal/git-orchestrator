@@ -1,6 +1,7 @@
 # Phase 1: Row cleanup — consolidated pill, collapsed chrome, kebab overflow
 
-**Status:** Planned
+**Status:** ✅ Completed
+**Completed:** 2026-04-20
 **Priority:** High
 **Type:** feature
 **Apps:** repo-dashboard

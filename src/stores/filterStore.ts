@@ -1,7 +1,13 @@
 import { create } from "zustand";
+import { sortByAttention } from "../lib/repoSort";
 import type { RepoStatus } from "../types";
 
-export type SortKey = "custom" | "name" | "latest" | "commits";
+export type SortKey =
+  | "attention"
+  | "custom"
+  | "name"
+  | "latest"
+  | "commits";
 export type SortDir = "asc" | "desc";
 export type StatusFilter =
   | "all"
@@ -25,7 +31,7 @@ interface FilterState {
 
 export const useFilterStore = create<FilterState>((set) => ({
   search: "",
-  sortBy: "custom",
+  sortBy: "attention",
   sortDir: "asc",
   filter: "all",
   setSearch: (v) => set({ search: v }),
@@ -35,18 +41,28 @@ export const useFilterStore = create<FilterState>((set) => ({
   setSortDir: (v) => set({ sortDir: v }),
   setFilter: (v) => set({ filter: v }),
   reset: () =>
-    set({ search: "", sortBy: "custom", sortDir: "asc", filter: "all" }),
+    set({ search: "", sortBy: "attention", sortDir: "asc", filter: "all" }),
 }));
 
 /** True when the user has touched any filter/sort/search away from the
- *  defaults — used by RepoList to disable drag-to-reorder (dragging only
- *  makes sense when the displayed order equals the stored priority). */
+ *  defaults. Used by the Reset button in RepoToolbar. `attention` is
+ *  the default sort, so it reads as "not filtered". */
 export function isFilterActive(
   search: string,
   sortBy: SortKey,
   filter: StatusFilter,
 ): boolean {
-  return search.trim() !== "" || sortBy !== "custom" || filter !== "all";
+  return search.trim() !== "" || sortBy !== "attention" || filter !== "all";
+}
+
+/** True when the visible list equals the stored priority order — the
+ *  only sort under which drag-to-reorder is coherent. */
+export function isCustomOrderView(
+  search: string,
+  sortBy: SortKey,
+  filter: StatusFilter,
+): boolean {
+  return search.trim() === "" && sortBy === "custom" && filter === "all";
 }
 
 function matchesFilter(s: RepoStatus, filter: StatusFilter): boolean {
@@ -109,7 +125,9 @@ export function applyFilterSort(
         s.branch.toLowerCase().includes(q),
     );
   }
-  if (sortBy !== "custom") {
+  if (sortBy === "attention") {
+    out = sortByAttention(out);
+  } else if (sortBy !== "custom") {
     const dir = sortDir === "asc" ? 1 : -1;
     out = [...out].sort((a, b) => {
       switch (sortBy) {
@@ -119,6 +137,8 @@ export function applyFilterSort(
           return (commitTime(a) - commitTime(b)) * dir;
         case "commits":
           return ((a.commitCount ?? -1) - (b.commitCount ?? -1)) * dir;
+        default:
+          return 0;
       }
     });
   }

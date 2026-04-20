@@ -1,6 +1,7 @@
 # Phase 2: Sidebar collapse — 3 primary + "More…" menu, footer auto-refresh
 
-**Status:** Planned
+**Status:** ✅ Completed
+**Completed:** 2026-04-20
 **Priority:** High
 **Type:** feature
 **Apps:** repo-dashboard

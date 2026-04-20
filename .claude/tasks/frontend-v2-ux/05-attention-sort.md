@@ -1,6 +1,7 @@
 # Phase 5: Attention sort + clean-row dimming
 
-**Status:** Planned
+**Status:** ✅ Completed
+**Completed:** 2026-04-20
 **Priority:** Medium
 **Type:** feature
 **Apps:** repo-dashboard

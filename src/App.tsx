@@ -25,18 +25,22 @@ import {
 import { UndoGroupResultDialog } from "./components/dialogs/UndoGroupResultDialog";
 import { UpdateDialog } from "./components/dialogs/UpdateDialog";
 import { WorkspaceActivationResultDialog } from "./components/dialogs/WorkspaceActivationResultDialog";
+import { CommandPalette } from "./components/CommandPalette";
 import { GitSetupBanner } from "./components/GitSetupBanner";
 import { RepoList } from "./components/RepoList";
 import { Sidebar } from "./components/Sidebar";
+import { useGlobalKeymap } from "./hooks/useGlobalKeymap";
 import * as api from "./lib/tauri";
 import { buildTooltip } from "./lib/trayTooltip";
 import { checkForUpdate } from "./lib/updater";
+import { useFilterStore } from "./stores/filterStore";
 import { useReposStore } from "./stores/reposStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useUiStore } from "./stores/uiStore";
 import { useWorkspacesStore } from "./stores/workspacesStore";
 
 function App() {
+  useGlobalKeymap();
   const loadSettings = useSettingsStore((s) => s.load);
   const settingsLoaded = useSettingsStore((s) => s.loaded);
   const refreshIntervalSec = useSettingsStore((s) => s.settings.refreshIntervalSec);
@@ -119,6 +123,26 @@ function App() {
     };
   }, [settingsLoaded, autoCheckUpdates]);
 
+  // Hydrate the session filterStore sort choice from persisted settings
+  // once the settings finish loading. Subsequent user changes to the
+  // sort dropdown flow back to settings via the subscribe below.
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    useFilterStore.setState({
+      sortBy: useSettingsStore.getState().settings.sortBy,
+    });
+    const unsub = useFilterStore.subscribe((state, prev) => {
+      if (state.sortBy === prev.sortBy) return;
+      const currentPersisted = useSettingsStore.getState().settings.sortBy;
+      if (currentPersisted === state.sortBy) return;
+      void useSettingsStore.getState().update({ sortBy: state.sortBy });
+    });
+    return unsub;
+    // Only hydrate once per `settingsLoaded` flip (typically once per app
+    // launch). Re-subscribing on every settings change would double-fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded]);
+
   // Streaming refresh: the backend emits one `repo-status-updated` event
   // per repo as each finishes. Register once at mount; the store patches
   // rows as events arrive.
@@ -193,6 +217,7 @@ function App() {
       <UndoGroupResultDialog />
       <UpdateDialog />
       <InfoDialog />
+      <CommandPalette />
     </div>
   );
 }

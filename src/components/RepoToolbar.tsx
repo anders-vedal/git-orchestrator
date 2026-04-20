@@ -17,6 +17,7 @@ import {
 } from "../stores/filterStore";
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "attention", label: "Attention" },
   { value: "custom", label: "Custom order" },
   { value: "name", label: "Name" },
   { value: "latest", label: "Latest change" },
@@ -53,7 +54,9 @@ export function RepoToolbar({ visibleCount }: Props) {
   const reset = useFilterStore((s) => s.reset);
 
   const active = isFilterActive(search, sortBy, filter);
-  const dirDisabled = sortBy === "custom";
+  // Sort direction is meaningless for `custom` (manual order) and for
+  // `attention` (the bucket ordering is opinionated, not asc/desc).
+  const dirDisabled = sortBy === "custom" || sortBy === "attention";
 
   const filterCounts = useMemo(
     () =>
@@ -71,10 +74,11 @@ export function RepoToolbar({ visibleCount }: Props) {
           className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500"
         />
         <input
+          id="repo-search-input"
           type="text"
           value={search}
           onChange={(e) => setSearch(e.currentTarget.value)}
-          placeholder="Search name, path or branch…"
+          placeholder="Search name, path or branch… (press / to focus)"
           spellCheck={false}
           className="h-8 w-full rounded-md border border-border bg-surface-2 pl-7 pr-7 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-blue-400 focus:outline-none"
         />
