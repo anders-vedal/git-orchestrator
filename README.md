@@ -38,7 +38,22 @@ Primary target is Windows 11 (x64 + ARM64). macOS and Linux builds run via
 `npm run tauri dev` / `npm run tauri build` but are **dev-quality**: no signed
 installers, no CI matrix. See the build prerequisites below.
 
-## Quick start
+## Install
+
+Pre-built signed installers are attached to every GitHub release:
+
+**[Download the latest release →](https://github.com/anders-vedal/git-orchestrator/releases/latest)**
+
+| OS | File |
+|---|---|
+| Windows (x64 / ARM64) | `Repo Dashboard_<ver>_x64-setup.exe` (NSIS) or `Repo Dashboard_<ver>_x64_en-US.msi` |
+| macOS (universal) | `Repo Dashboard_<ver>_universal.dmg` — unsigned; first launch needs `xattr -cr "/Applications/Repo Dashboard.app"` |
+| Linux (Ubuntu/Debian) | `repo-dashboard_<ver>_amd64.deb` or `repo-dashboard_<ver>_amd64.AppImage` |
+
+Existing installs auto-update from the same release feed via the Tauri updater plugin
+(signed with the project's minisign key).
+
+## Build from source
 
 ```bash
 npm install
