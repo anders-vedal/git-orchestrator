@@ -59,40 +59,62 @@ pub async fn open_terminal(id: i64) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("path missing: {}", path.display()));
     }
-    let pref = db::with_conn(|c| crate::db::queries::get_setting(c, "terminal"))
+    let pref = terminal_pref();
+    launch_terminal(&pref, &path, None)
+}
+
+/// Launch the user's preferred terminal in `path`, with `command` as the
+/// initial command to execute. The shell is kept open after `command`
+/// exits so users can read output, retry, or keep using the terminal.
+/// Called by `cli_actions::run_cli_action` — not a Tauri command directly.
+///
+/// SAFETY: `command` is interpolated into shell commandlines. Callers MUST
+/// have already sanitized the input. `commands::settings::validate_cli_actions`
+/// is the canonical validator for the current caller — it strips shell
+/// metacharacters before the value is persisted.
+pub async fn launch_terminal_in_repo_with_command(
+    id: i64,
+    command: &str,
+) -> Result<(), String> {
+    let path = load_path(id).await?;
+    if !path.exists() {
+        return Err(format!("path missing: {}", path.display()));
+    }
+    let pref = terminal_pref();
+    launch_terminal(&pref, &path, Some(command))
+}
+
+fn terminal_pref() -> String {
+    db::with_conn(|c| crate::db::queries::get_setting(c, "terminal"))
         .ok()
         .flatten()
-        .unwrap_or_else(|| "auto".to_string());
-
-    launch_terminal(&pref, &path)
+        .unwrap_or_else(|| "auto".to_string())
 }
 
 #[cfg(windows)]
-fn launch_terminal(pref: &str, path: &Path) -> Result<(), String> {
-    use std::path::PathBuf;
-
+fn launch_terminal(pref: &str, path: &Path, run: Option<&str>) -> Result<(), String> {
     let path_str = path
         .to_str()
         .ok_or_else(|| "path contains non-utf8 characters".to_string())?;
 
     match pref {
-        "wt" => launch_wt(path_str),
-        "git-bash" => launch_git_bash(path),
-        "cmd" => launch_cmd(path_str),
+        "wt" => launch_wt(path_str, run),
+        "git-bash" => launch_git_bash(path, run),
+        "cmd" => launch_cmd(path_str, run),
         _ => {
             // auto — try in order
             if which("wt.exe") {
-                if launch_wt(path_str).is_ok() {
+                if launch_wt(path_str, run).is_ok() {
                     return Ok(());
                 }
             }
             let git_bash = PathBuf::from(r"C:\Program Files\Git\git-bash.exe");
             if git_bash.exists() {
-                if launch_git_bash_at(&git_bash, path).is_ok() {
+                if launch_git_bash_at(&git_bash, path, run).is_ok() {
                     return Ok(());
                 }
             }
-            launch_cmd(path_str)
+            launch_cmd(path_str, run)
         }
     }
 }
@@ -109,30 +131,43 @@ fn which(name: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn launch_wt(path: &str) -> Result<(), String> {
+fn launch_wt(path: &str, run: Option<&str>) -> Result<(), String> {
     let mut cmd = Command::new("wt.exe");
     cmd.arg("-d").arg(path);
+    if let Some(r) = run {
+        // After -d, wt treats the rest of argv as the commandline to run.
+        // Route through `cmd /k` so the shell stays open after the user's
+        // command exits. `run` is validated by the caller to contain no
+        // shell metacharacters, but wt itself consumes `;` as a new-tab
+        // separator; the caller's whitelist disallows `;` so we're safe.
+        cmd.args(["cmd", "/k", r]);
+    }
     spawn_visible(cmd)
 }
 
 #[cfg(windows)]
-fn launch_git_bash(path: &Path) -> Result<(), String> {
+fn launch_git_bash(path: &Path, run: Option<&str>) -> Result<(), String> {
     let default = std::path::PathBuf::from(r"C:\Program Files\Git\git-bash.exe");
-    launch_git_bash_at(&default, path)
+    launch_git_bash_at(&default, path, run)
 }
 
 #[cfg(windows)]
-fn launch_git_bash_at(exe: &Path, path: &Path) -> Result<(), String> {
+fn launch_git_bash_at(exe: &Path, path: &Path, run: Option<&str>) -> Result<(), String> {
     if !exe.exists() {
         return Err(format!("{} not found", exe.display()));
     }
     let mut cmd = Command::new(exe);
     cmd.arg(format!("--cd={}", path.display()));
+    if let Some(r) = run {
+        // `exec bash` keeps the interactive shell after the user's command
+        // exits (so they can read output / retry).
+        cmd.args(["-c", &format!("{r}; exec bash")]);
+    }
     spawn_visible(cmd)
 }
 
 #[cfg(windows)]
-fn launch_cmd(path: &str) -> Result<(), String> {
+fn launch_cmd(path: &str, run: Option<&str>) -> Result<(), String> {
     // `cmd /K "cd /d \"<path>\""` composes a command-line string, so it's
     // exposed to cmd.exe's parsing quirks — `%VAR%` expansion, `^` escaping,
     // `!` delayed expansion. Windows filesystem rules forbid `"` in paths
@@ -145,59 +180,76 @@ fn launch_cmd(path: &str) -> Result<(), String> {
             "refused: path contains characters unsafe for cmd.exe ({path}). Use Windows Terminal or Git Bash instead."
         ));
     }
+    let tail = match run {
+        Some(r) => format!("cd /d \"{path}\" && {r}"),
+        None => format!("cd /d \"{path}\""),
+    };
     let mut cmd = Command::new("cmd");
-    cmd.args([
-        "/c",
-        "start",
-        "cmd",
-        "/K",
-        &format!("cd /d \"{path}\""),
-    ]);
+    cmd.args(["/c", "start", "cmd", "/K", &tail]);
     spawn_visible(cmd)
 }
 
 #[cfg(target_os = "macos")]
-fn launch_terminal(pref: &str, path: &Path) -> Result<(), String> {
+fn launch_terminal(pref: &str, path: &Path, run: Option<&str>) -> Result<(), String> {
     let path_str = path
         .to_str()
         .ok_or_else(|| "path contains non-utf8 characters".to_string())?;
 
     match pref {
-        "iterm2" => launch_macos_app("iTerm", path_str),
-        "terminal" => launch_macos_app("Terminal", path_str),
+        "iterm2" => launch_macos_app("iTerm", path_str, run),
+        "terminal" => launch_macos_app("Terminal", path_str, run),
         _ => {
             // auto — prefer iTerm when installed, otherwise Terminal.
             if std::path::Path::new("/Applications/iTerm.app").exists() {
-                if launch_macos_app("iTerm", path_str).is_ok() {
+                if launch_macos_app("iTerm", path_str, run).is_ok() {
                     return Ok(());
                 }
             }
-            launch_macos_app("Terminal", path_str)
+            launch_macos_app("Terminal", path_str, run)
         }
     }
 }
 
 #[cfg(target_os = "macos")]
-fn launch_macos_app(app_name: &str, path: &str) -> Result<(), String> {
-    // `open -a <app> <path>` opens <path> in <app>. For Terminal/iTerm
-    // this opens a new window with the working directory set to <path>.
-    let mut cmd = Command::new("open");
-    cmd.args(["-a", app_name, path]);
-    spawn_visible(cmd)
+fn launch_macos_app(app_name: &str, path: &str, run: Option<&str>) -> Result<(), String> {
+    match run {
+        None => {
+            // `open -a <app> <path>` opens <path> in <app>. For Terminal/iTerm
+            // this opens a new window with the working directory set to <path>.
+            let mut cmd = Command::new("open");
+            cmd.args(["-a", app_name, path]);
+            spawn_visible(cmd)
+        }
+        Some(r) => {
+            // AppleScript: `tell application "Terminal" to do script "cd ... && ..."`.
+            // Single-quote the path and the command so AppleScript treats them
+            // as a literal bash commandline. The caller has already validated
+            // that `r` contains no single quotes or other shell metacharacters.
+            let script = format!(
+                "tell application \"{app}\" to do script \"cd '{path}' && {cmd}\"",
+                app = app_name,
+                path = path,
+                cmd = r
+            );
+            let mut cmd = Command::new("osascript");
+            cmd.args(["-e", &script]);
+            spawn_visible(cmd)
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn launch_terminal(pref: &str, path: &Path) -> Result<(), String> {
+fn launch_terminal(pref: &str, path: &Path, run: Option<&str>) -> Result<(), String> {
     let path_str = path
         .to_str()
         .ok_or_else(|| "path contains non-utf8 characters".to_string())?;
 
     match pref {
-        "gnome-terminal" => launch_linux_terminal("gnome-terminal", path_str),
-        "konsole" => launch_linux_terminal("konsole", path_str),
-        "alacritty" => launch_linux_terminal("alacritty", path_str),
-        "kitty" => launch_linux_terminal("kitty", path_str),
-        "xterm" => launch_linux_terminal("xterm", path_str),
+        "gnome-terminal" => launch_linux_terminal("gnome-terminal", path_str, run),
+        "konsole" => launch_linux_terminal("konsole", path_str, run),
+        "alacritty" => launch_linux_terminal("alacritty", path_str, run),
+        "kitty" => launch_linux_terminal("kitty", path_str, run),
+        "xterm" => launch_linux_terminal("xterm", path_str, run),
         _ => {
             // auto — walk a sensible preference order, skipping any that
             // aren't on PATH. `x-terminal-emulator` is the Debian/Ubuntu
@@ -212,7 +264,7 @@ fn launch_terminal(pref: &str, path: &Path) -> Result<(), String> {
                 "xterm",
             ] {
                 if which(candidate) {
-                    if launch_linux_terminal(candidate, path_str).is_ok() {
+                    if launch_linux_terminal(candidate, path_str, run).is_ok() {
                         return Ok(());
                     }
                 }
@@ -234,7 +286,7 @@ fn which(name: &str) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn launch_linux_terminal(name: &str, path: &str) -> Result<(), String> {
+fn launch_linux_terminal(name: &str, path: &str, run: Option<&str>) -> Result<(), String> {
     let mut cmd = Command::new(name);
     // Different emulators spell "start here" differently:
     //   gnome-terminal / konsole / x-terminal-emulator / alacritty → --working-directory
@@ -249,6 +301,19 @@ fn launch_linux_terminal(name: &str, path: &str) -> Result<(), String> {
         }
         _ => {
             cmd.args(["--working-directory", path]);
+        }
+    }
+    if let Some(r) = run {
+        // Hand the command to bash via `-c`; `exec bash` keeps the shell
+        // open after it exits. Caller has already sanitized `r`, so simple
+        // interpolation is safe.
+        let shell_line = format!("{r}; exec bash");
+        // gnome-terminal splits args after `--`; every other emulator
+        // here accepts `-e`.
+        if name == "gnome-terminal" || name == "x-terminal-emulator" {
+            cmd.args(["--", "bash", "-c", &shell_line]);
+        } else {
+            cmd.args(["-e", "bash", "-c", &shell_line]);
         }
     }
     spawn_visible(cmd)

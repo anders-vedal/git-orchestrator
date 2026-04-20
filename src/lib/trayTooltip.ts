@@ -6,13 +6,20 @@ import type { RepoStatus } from "../types";
  *
  * Format (Windows tooltips wrap at ~127 chars; we keep it compact):
  *
- *   Repo Dashboard — 12 repos
+ *   [NOR-876] Repo Dashboard — 12 repos
  *   3 behind · 1 ahead · 2 dirty · 1 error
  *   attention: recruitment (behind 3), cortex (dirty)
+ *
+ * `activeWorkspaceName`, when non-null, is prefixed as `[name] ` on the
+ * header line so the tray surface reflects the current workspace context.
  */
-export function buildTooltip(statuses: RepoStatus[]): string {
+export function buildTooltip(
+  statuses: RepoStatus[],
+  activeWorkspaceName?: string | null,
+): string {
+  const wsPrefix = activeWorkspaceName ? `[${activeWorkspaceName}] ` : "";
   if (statuses.length === 0) {
-    return "Repo Dashboard — no repos registered";
+    return `${wsPrefix}Repo Dashboard — no repos registered`;
   }
 
   let behind = 0;
@@ -45,7 +52,7 @@ export function buildTooltip(statuses: RepoStatus[]): string {
     }
   }
 
-  const head = `Repo Dashboard — ${statuses.length} repo${statuses.length === 1 ? "" : "s"}`;
+  const head = `${wsPrefix}Repo Dashboard — ${statuses.length} repo${statuses.length === 1 ? "" : "s"}`;
   const summary = [
     diverged > 0 ? `${diverged} diverged` : null,
     behind > 0 ? `${behind} behind` : null,

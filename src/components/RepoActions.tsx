@@ -9,12 +9,14 @@ import {
   ChevronUp,
   GitCommitHorizontal,
   Loader2,
+  Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as api from "../lib/tauri";
 import { useReposStore } from "../stores/reposStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { useUiStore } from "../stores/uiStore";
-import type { RepoStatus } from "../types";
+import type { CliAction, RepoStatus } from "../types";
 import { IconButton } from "./ui/Button";
 
 interface Props {
@@ -23,13 +25,32 @@ interface Props {
 
 export function RepoActions({ status }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const refreshOne = useReposStore((s) => s.refreshOne);
   const openDialog = useUiStore((s) => s.openDialog);
   const toggleExpanded = useUiStore((s) => s.toggleExpanded);
   const isExpanded = useUiStore((s) => s.expandedIds.has(status.id));
+  const cliActions = useSettingsStore((s) => s.settings.cliActions);
 
   const onDefault = status.branch === status.defaultBranch;
   const hasChanges = status.dirty !== "clean";
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
 
   async function run(
     name: string,
@@ -59,6 +80,31 @@ export function RepoActions({ status }: Props) {
       setBusy(null);
     }
   }
+
+  function runAction(action: CliAction) {
+    setMenuOpen(false);
+    void run("Claude Code", () => api.runCliAction(status.id, action.id), {
+      refresh: false,
+      gitError: false,
+      errorTitle: `Launching ${action.label} failed`,
+    });
+  }
+
+  function onClaudeClick() {
+    if (cliActions.length === 0) return;
+    if (cliActions.length === 1) {
+      runAction(cliActions[0]);
+      return;
+    }
+    setMenuOpen((v) => !v);
+  }
+
+  const claudeTitle =
+    cliActions.length === 0
+      ? ""
+      : cliActions.length === 1
+        ? `Launch Claude Code with ${cliActions[0].slashCommand} in this repo — opens a new terminal, cds into the repo, and runs \`claude "${cliActions[0].slashCommand}"\``
+        : `Launch Claude Code in this repo — ${cliActions.length} actions configured, pick one`;
 
   return (
     <div className="flex items-center gap-1">
@@ -163,6 +209,43 @@ export function RepoActions({ status }: Props) {
       >
         <TerminalSquare size={16} />
       </IconButton>
+
+      {cliActions.length > 0 && (
+        <div className="relative" ref={menuRef}>
+          <IconButton
+            title={claudeTitle}
+            tone="primary"
+            onClick={onClaudeClick}
+            disabled={busy === "Claude Code"}
+          >
+            {busy === "Claude Code" ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
+          </IconButton>
+          {menuOpen && cliActions.length > 1 && (
+            <div
+              role="menu"
+              className="absolute right-0 top-full z-30 mt-1 min-w-[180px] overflow-hidden rounded-md border border-border-strong bg-surface-1 shadow-xl"
+            >
+              {cliActions.map((a) => (
+                <button
+                  key={a.id}
+                  role="menuitem"
+                  onClick={() => runAction(a)}
+                  className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left text-sm text-zinc-100 hover:bg-surface-3"
+                >
+                  <span className="font-medium">{a.label}</span>
+                  <code className="font-mono text-[11px] text-zinc-400">
+                    {a.slashCommand}
+                  </code>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <IconButton
         title={

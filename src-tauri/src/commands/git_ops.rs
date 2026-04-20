@@ -3,7 +3,8 @@ use crate::db::queries::NewActionLog;
 use crate::git::{log, runner, status};
 use crate::models::{
     ActionLogEntry, BulkPullReport, BulkReason, BulkResult, CommitPushResult, ConfigureHelperResult,
-    Dirty, DirtyBreakdown, ForcePullPreview, ForcePullResult, GitSetupStatus, SignInResult,
+    Dirty, DirtyBreakdown, ForcePullPreview, ForcePullResult, GitSetupStatus, RecentActionGroup,
+    SignInResult, UndoGroupKind, UndoGroupOutcome, UndoGroupReport,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -48,7 +49,7 @@ fn merge_stdout_stderr(out: &runner::GitOutput) -> String {
     s
 }
 
-async fn load_repo(id: i64) -> Result<crate::models::Repo, String> {
+pub async fn load_repo(id: i64) -> Result<crate::models::Repo, String> {
     db::with_conn(|c| crate::db::queries::find_repo(c, id))
 }
 
@@ -194,7 +195,7 @@ pub async fn git_force_pull(id: i64) -> Result<ForcePullResult, String> {
     .map_err(|e| e.to_string())?
 }
 
-fn log_action(
+pub fn log_action(
     repo_id: i64,
     action: &str,
     pre_head_sha: Option<&str>,
@@ -362,6 +363,343 @@ pub async fn undo_last_action(id: i64) -> Result<ForcePullResult, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Roll back every repo that was touched as part of a multi-repo action
+/// group (e.g. a workspace activation that switched branches across N
+/// repos). For each successful HEAD-moving leg of the group, verify it's
+/// safe to reset and run `git reset --hard <pre_head_sha>`. Each undo
+/// leg is itself logged to `action_log` under a fresh group_id so the
+/// undo is traceable (and re-recoverable via the reflog if needed).
+///
+/// Safety gates (per repo):
+/// - Original row must have exit_code == 0 (skip failed legs).
+/// - pre_head_sha and post_head_sha must be present and differ (skip
+///   no-op legs like stash_apply that don't move HEAD).
+/// - Working tree must be clean — refuse otherwise rather than clobber
+///   new user changes.
+/// - Current HEAD must still point at post_head_sha — if the user has
+///   committed, pulled, or switched since the action ran, we respect
+///   their newer state instead of silently rewinding it.
+/// - pre_head_sha must still resolve in the repo (reflog GC could have
+///   pruned it, though within the 90-day default that's rare).
+#[tauri::command]
+pub async fn undo_action_group(group_id: String) -> Result<UndoGroupReport, String> {
+    if group_id.trim().is_empty() {
+        return Err("group_id is required".to_string());
+    }
+
+    let rows = db::with_conn(|c| db::queries::actions_in_group(c, &group_id))?;
+    if rows.is_empty() {
+        return Err(format!(
+            "no action_log rows found for group '{group_id}'"
+        ));
+    }
+
+    let undo_group_id = new_action_group_id();
+
+    let outcomes = tokio::task::spawn_blocking({
+        let group_id = group_id.clone();
+        let undo_group_id = undo_group_id.clone();
+        move || -> Vec<UndoGroupOutcome> {
+            // A group can contain multiple rows for the same repo (rare —
+            // e.g. a retried leg). Undo the LATEST row per repo so we
+            // unwind the final state, not an intermediate one.
+            let mut latest_per_repo: std::collections::HashMap<i64, ActionLogEntry> =
+                std::collections::HashMap::new();
+            for row in rows {
+                latest_per_repo
+                    .entry(row.repo_id)
+                    .and_modify(|existing| {
+                        if row.id > existing.id {
+                            *existing = row.clone();
+                        }
+                    })
+                    .or_insert(row);
+            }
+            let mut ordered: Vec<ActionLogEntry> =
+                latest_per_repo.into_values().collect();
+            ordered.sort_by_key(|r| r.id);
+
+            ordered
+                .into_iter()
+                .map(|row| undo_one(&group_id, &undo_group_id, row))
+                .collect()
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // If nothing was actually reverted, return an empty undo_group_id —
+    // no rows were written, and surfacing a fake id would clutter the
+    // Undo history dropdown.
+    let any_reverted = outcomes
+        .iter()
+        .any(|o| matches!(o.kind, UndoGroupKind::Reverted));
+    Ok(UndoGroupReport {
+        group_id,
+        undo_group_id: if any_reverted { undo_group_id } else { String::new() },
+        outcomes,
+    })
+}
+
+fn undo_one(
+    group_id: &str,
+    undo_group_id: &str,
+    row: ActionLogEntry,
+) -> UndoGroupOutcome {
+    let _ = group_id; // retained for future audit logging
+
+    let repo_name = db::with_conn(|c| db::queries::find_repo(c, row.repo_id))
+        .map(|r| r.name)
+        .unwrap_or_else(|_| format!("repo {}", row.repo_id));
+
+    // Skip failed original legs.
+    if row.exit_code != 0 {
+        return UndoGroupOutcome {
+            repo_id: row.repo_id,
+            repo_name,
+            action: row.action,
+            target_short: row.pre_head_sha.as_deref().map(short_sha),
+            from_short: row.post_head_sha.as_deref().map(short_sha),
+            kind: UndoGroupKind::SkippedOriginalFailed,
+            message: "Original action failed — nothing to undo.".to_string(),
+        };
+    }
+
+    let Some(pre) = row.pre_head_sha.clone() else {
+        return UndoGroupOutcome {
+            repo_id: row.repo_id,
+            repo_name,
+            action: row.action,
+            target_short: None,
+            from_short: row.post_head_sha.as_deref().map(short_sha),
+            kind: UndoGroupKind::SkippedNoPreHead,
+            message: "No pre-action HEAD was recorded for this leg.".to_string(),
+        };
+    };
+
+    let post = match row.post_head_sha.clone() {
+        Some(p) if p != pre => p,
+        Some(_) => {
+            return UndoGroupOutcome {
+                repo_id: row.repo_id,
+                repo_name,
+                action: row.action,
+                target_short: Some(short_sha(&pre)),
+                from_short: Some(short_sha(&pre)),
+                kind: UndoGroupKind::SkippedNoHeadMove,
+                message: "Action did not move HEAD — a reset wouldn't undo its effect."
+                    .to_string(),
+            };
+        }
+        None => {
+            return UndoGroupOutcome {
+                repo_id: row.repo_id,
+                repo_name,
+                action: row.action,
+                target_short: Some(short_sha(&pre)),
+                from_short: None,
+                kind: UndoGroupKind::SkippedNoHeadMove,
+                message: "No post-action HEAD was recorded for this leg.".to_string(),
+            };
+        }
+    };
+
+    let repo = match db::with_conn(|c| db::queries::find_repo(c, row.repo_id)) {
+        Ok(r) => r,
+        Err(_) => {
+            return UndoGroupOutcome {
+                repo_id: row.repo_id,
+                repo_name,
+                action: row.action,
+                target_short: Some(short_sha(&pre)),
+                from_short: Some(short_sha(&post)),
+                kind: UndoGroupKind::SkippedMissingRepo,
+                message: "Repo has been removed from the dashboard.".to_string(),
+            };
+        }
+    };
+
+    let p = Path::new(&repo.path);
+    if !p.exists() {
+        return UndoGroupOutcome {
+            repo_id: row.repo_id,
+            repo_name: repo.name,
+            action: row.action,
+            target_short: Some(short_sha(&pre)),
+            from_short: Some(short_sha(&post)),
+            kind: UndoGroupKind::SkippedMissingRepo,
+            message: format!("Repo path no longer exists: {}", repo.path),
+        };
+    }
+
+    // pre_head_sha must still resolve to a commit.
+    match status::ref_short_sha(p, &pre) {
+        Ok(Some(_)) => {}
+        _ => {
+            return UndoGroupOutcome {
+                repo_id: row.repo_id,
+                repo_name: repo.name,
+                action: row.action,
+                target_short: Some(short_sha(&pre)),
+                from_short: Some(short_sha(&post)),
+                kind: UndoGroupKind::SkippedMissingCommit,
+                message: format!(
+                    "Pre-action commit {} is no longer reachable in this repo.",
+                    short_sha(&pre)
+                ),
+            };
+        }
+    }
+
+    // HEAD must still match post_head_sha.
+    let current_head = match status::current_head_sha(p) {
+        Ok(h) => h,
+        Err(e) => {
+            return UndoGroupOutcome {
+                repo_id: row.repo_id,
+                repo_name: repo.name,
+                action: row.action,
+                target_short: Some(short_sha(&pre)),
+                from_short: Some(short_sha(&post)),
+                kind: UndoGroupKind::Failed,
+                message: format!("Could not read current HEAD: {}", e),
+            };
+        }
+    };
+    let current_head_str = current_head.clone().unwrap_or_default();
+    if current_head_str != post {
+        return UndoGroupOutcome {
+            repo_id: row.repo_id,
+            repo_name: repo.name,
+            action: row.action,
+            target_short: Some(short_sha(&pre)),
+            from_short: current_head.as_deref().map(short_sha),
+            kind: UndoGroupKind::SkippedHeadMoved,
+            message: format!(
+                "HEAD is now {}, not {} — you've moved on since the action ran.",
+                current_head
+                    .as_deref()
+                    .map(short_sha)
+                    .unwrap_or_else(|| "unborn".to_string()),
+                short_sha(&post),
+            ),
+        };
+    }
+
+    // Working tree must be clean.
+    match status::dirty_from_porcelain(p) {
+        Ok(Dirty::Clean) => {}
+        Ok(other) => {
+            return UndoGroupOutcome {
+                repo_id: row.repo_id,
+                repo_name: repo.name,
+                action: row.action,
+                target_short: Some(short_sha(&pre)),
+                from_short: current_head.as_deref().map(short_sha),
+                kind: UndoGroupKind::SkippedDirty,
+                message: format!(
+                    "Working tree is {:?} — commit or stash before undoing.",
+                    other
+                ),
+            };
+        }
+        Err(e) => {
+            return UndoGroupOutcome {
+                repo_id: row.repo_id,
+                repo_name: repo.name,
+                action: row.action,
+                target_short: Some(short_sha(&pre)),
+                from_short: current_head.as_deref().map(short_sha),
+                kind: UndoGroupKind::Failed,
+                message: format!("Could not read working tree status: {}", e),
+            };
+        }
+    }
+
+    // All gates passed — reset.
+    let started_at = now_iso();
+    let t0 = Instant::now();
+    let reset = match runner::run_git_raw(p, &["reset", "--hard", &pre]) {
+        Ok(o) => o,
+        Err(e) => {
+            let msg = e.to_string();
+            log_action_in_group(
+                row.repo_id,
+                "undo_group",
+                current_head.as_deref(),
+                current_head.as_deref(),
+                -1,
+                Some(&msg),
+                &started_at,
+                t0.elapsed().as_millis() as i64,
+                undo_group_id,
+            );
+            return UndoGroupOutcome {
+                repo_id: row.repo_id,
+                repo_name: repo.name,
+                action: row.action,
+                target_short: Some(short_sha(&pre)),
+                from_short: current_head.as_deref().map(short_sha),
+                kind: UndoGroupKind::Failed,
+                message: msg,
+            };
+        }
+    };
+    let dur = t0.elapsed().as_millis() as i64;
+
+    if reset.code != 0 {
+        let msg = merge_stdout_stderr(&reset);
+        log_action_in_group(
+            row.repo_id,
+            "undo_group",
+            current_head.as_deref(),
+            current_head.as_deref(),
+            reset.code,
+            Some(&msg),
+            &started_at,
+            dur,
+            undo_group_id,
+        );
+        return UndoGroupOutcome {
+            repo_id: row.repo_id,
+            repo_name: repo.name,
+            action: row.action,
+            target_short: Some(short_sha(&pre)),
+            from_short: current_head.as_deref().map(short_sha),
+            kind: UndoGroupKind::Failed,
+            message: msg,
+        };
+    }
+
+    let post_undo_head = status::current_head_sha(p).ok().flatten();
+    let summary = merge_stdout_stderr(&reset);
+    log_action_in_group(
+        row.repo_id,
+        "undo_group",
+        current_head.as_deref(),
+        post_undo_head.as_deref(),
+        0,
+        excerpt(&summary).as_deref(),
+        &started_at,
+        dur,
+        undo_group_id,
+    );
+
+    UndoGroupOutcome {
+        repo_id: row.repo_id,
+        repo_name: repo.name,
+        action: row.action,
+        target_short: Some(short_sha(&pre)),
+        from_short: current_head.as_deref().map(short_sha),
+        kind: UndoGroupKind::Reverted,
+        message: if summary.trim().is_empty() {
+            format!("Reset to {}.", short_sha(&pre))
+        } else {
+            summary
+        },
+    }
 }
 
 /// Stage every change (`git add -A`), commit with the supplied message, and
@@ -779,6 +1117,23 @@ pub async fn configure_credential_helper() -> Result<ConfigureHelperResult, Stri
 pub async fn get_action_log(id: i64, limit: Option<i64>) -> Result<Vec<ActionLogEntry>, String> {
     let limit = limit.unwrap_or(20).clamp(1, 200);
     db::with_conn(|c| db::queries::recent_actions_for_repo(c, id, limit))
+}
+
+/// Cross-repo action history — returns the N most recent multi-repo
+/// action groups (workspace activation, stash bundle push / restore,
+/// undo_group). Powers the Recent Actions dialog. Single-repo actions
+/// (force_pull, commit_push) are excluded; they're visible on the
+/// per-repo action panel.
+#[tauri::command]
+pub async fn list_recent_action_groups(
+    limit: Option<i64>,
+) -> Result<Vec<RecentActionGroup>, String> {
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    tokio::task::spawn_blocking(move || {
+        db::with_conn(|c| db::queries::list_recent_action_groups(c, limit))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Pre-flight disclosure for the force-pull dialog: what would be discarded,

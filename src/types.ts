@@ -153,6 +153,29 @@ export interface ScanAddResult {
   skipped: ScanSkip[];
 }
 
+export interface BranchInfo {
+  name: string;
+  shortSha: string;
+  isRemote: boolean;
+  isCurrent: boolean;
+  upstream: string | null;
+  lastCommitAt: string | null;
+}
+
+export interface BranchList {
+  current: string | null;
+  local: BranchInfo[];
+  remote: BranchInfo[];
+}
+
+export interface CheckoutResult {
+  previousBranch: string | null;
+  previousHeadSha: string | null;
+  newBranch: string;
+  newHeadSha: string | null;
+  message: string;
+}
+
 /**
  * One entry in the cross-repo activity feed. Backend flattens `Commit`
  * into the repo context so the frontend can render a unified list
@@ -185,13 +208,32 @@ export type TerminalPref =
   | "xterm";
 export type ThemePref = "dark" | "light" | "system";
 
+/**
+ * A user-configured Claude Code launcher entry. Backend persists the list
+ * as a JSON-encoded string under the `cli_actions` setting and enforces
+ * the whitelist (`slashCommand` must start with `/` and may only contain
+ * safe characters) before the value lands in SQLite. See
+ * `src-tauri/src/commands/settings.rs::validate_cli_actions`.
+ */
+export interface CliAction {
+  id: string;
+  label: string;
+  slashCommand: string;
+}
+
 export interface Settings {
   terminal: TerminalPref;
   refreshIntervalSec: number;
   defaultReposDir: string | null;
   theme: ThemePref;
   bulkConcurrency: number;
+  autoCheckUpdates: boolean;
+  cliActions: CliAction[];
 }
+
+export const DEFAULT_CLI_ACTIONS: CliAction[] = [
+  { id: "ship", label: "Ship", slashCommand: "/ship" },
+];
 
 export const DEFAULT_SETTINGS: Settings = {
   terminal: "auto",
@@ -199,6 +241,8 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultReposDir: null,
   theme: "dark",
   bulkConcurrency: 4,
+  autoCheckUpdates: true,
+  cliActions: DEFAULT_CLI_ACTIONS,
 };
 
 export interface SignInResult {
@@ -218,4 +262,183 @@ export interface GitSetupStatus {
 export interface ConfigureHelperResult {
   helper: string;
   message: string;
+}
+
+/* --------- Workspaces (Phase 2.2) --------- */
+
+export interface WorkspaceSummary {
+  id: number;
+  name: string;
+  repoCount: number;
+  updatedAt: string;
+}
+
+export interface WorkspaceRepoEntry {
+  repoId: number;
+  repoName: string;
+  repoPathExists: boolean;
+  branch: string;
+  position: number;
+}
+
+export interface WorkspaceDetail {
+  id: number;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  entries: WorkspaceRepoEntry[];
+}
+
+export type ActivationKind =
+  | "switched"
+  | "tracked"
+  | "already_on"
+  | "skipped_dirty"
+  | "skipped_missing_repo"
+  | "skipped_missing_branch"
+  | "failed";
+
+export interface ActivationOutcome {
+  repoId: number;
+  repoName: string;
+  requestedBranch: string;
+  kind: ActivationKind;
+  message: string;
+}
+
+export interface ActivationReport {
+  workspaceId: number;
+  workspaceName: string;
+  groupId: string;
+  outcomes: ActivationOutcome[];
+}
+
+/** (repoId, branch) pair — the shape backend CRUD wants. */
+export type WorkspaceEntryInput = [number, string];
+
+/* --------- Stash bundles (Phase 2.3) --------- */
+
+export type StashStatus =
+  | "pending"
+  | "restored"
+  | "dropped"
+  | "missing"
+  | "failed";
+
+export interface StashBundleSummary {
+  id: number;
+  label: string;
+  createdAt: string;
+  entryCount: number;
+  pendingCount: number;
+}
+
+export interface StashEntry {
+  repoId: number;
+  repoName: string;
+  repoPathExists: boolean;
+  stashSha: string;
+  stashShort: string;
+  branchAtStash: string | null;
+  status: StashStatus;
+  createdAt: string;
+}
+
+export interface StashBundleDetail {
+  id: number;
+  label: string;
+  createdAt: string;
+  entries: StashEntry[];
+}
+
+export type StashPushKind =
+  | "stashed"
+  | "nothing_to_stash"
+  | "skipped_missing_repo"
+  | "failed";
+
+export interface StashPushOutcome {
+  repoId: number;
+  repoName: string;
+  kind: StashPushKind;
+  stashSha: string | null;
+  message: string;
+}
+
+export interface StashPushReport {
+  bundleId: number | null;
+  label: string;
+  outcomes: StashPushOutcome[];
+}
+
+export type StashRestoreKind =
+  | "restored"
+  | "missing"
+  | "failed"
+  | "already_done"
+  | "skipped_missing_repo";
+
+export interface StashRestoreOutcome {
+  repoId: number;
+  repoName: string;
+  stashSha: string;
+  kind: StashRestoreKind;
+  message: string;
+}
+
+export interface StashRestoreReport {
+  bundleId: number;
+  label: string;
+  groupId: string;
+  outcomes: StashRestoreOutcome[];
+}
+
+/* --------- Phase 2.4: multi-repo group-scoped undo --------- */
+
+export type UndoGroupKind =
+  | "reverted"
+  | "skipped_original_failed"
+  | "skipped_no_head_move"
+  | "skipped_no_pre_head"
+  | "skipped_head_moved"
+  | "skipped_dirty"
+  | "skipped_missing_repo"
+  | "skipped_missing_commit"
+  | "failed";
+
+export interface UndoGroupOutcome {
+  repoId: number;
+  repoName: string;
+  action: string;
+  targetShort: string | null;
+  fromShort: string | null;
+  kind: UndoGroupKind;
+  message: string;
+}
+
+export interface UndoGroupReport {
+  /** The original group_id we were asked to undo. */
+  groupId: string;
+  /** The group_id assigned to the undo's own action_log rows. Empty
+   *  when the pass didn't actually revert anything. */
+  undoGroupId: string;
+  outcomes: UndoGroupOutcome[];
+}
+
+/** One entry in the cross-repo action history. */
+export interface RecentActionGroup {
+  groupId: string;
+  /** Representative action label (e.g. "workspace_activate"). */
+  action: string;
+  repoCount: number;
+  successCount: number;
+  /** Legs where HEAD actually moved — 0 for stash_push / stash_apply
+   *  (stash doesn't touch HEAD), so the Undo button is a no-op for
+   *  those and the UI hides it. */
+  headMoveCount: number;
+  /** Newest started_at ISO8601 timestamp across the group. */
+  occurredAt: string;
+  /** First few repo names (capped backend-side at 4). */
+  repoNames: string[];
+  repoNamesTruncated: boolean;
 }

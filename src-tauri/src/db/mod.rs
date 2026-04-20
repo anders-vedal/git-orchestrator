@@ -29,6 +29,13 @@ pub fn init() -> Result<(), String> {
     let conn = Connection::open(&path)
         .map_err(|e| format!("failed to open sqlite at {}: {}", path.display(), e))?;
 
+    // SQLite disables foreign keys unless a per-connection pragma turns them
+    // on. Phase 2.2 workspace_repos → repos uses ON DELETE CASCADE, which
+    // only fires when this is set. Harmless for pre-existing tables since
+    // none of them declare foreign keys.
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| format!("failed to enable foreign_keys pragma: {}", e))?;
+
     schema::apply(&conn).map_err(|e| format!("failed to apply schema: {}", e))?;
 
     DB.set(Mutex::new(conn))
