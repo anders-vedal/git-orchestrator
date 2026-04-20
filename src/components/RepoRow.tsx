@@ -6,6 +6,7 @@ import {
   ArrowUpFromLine,
   Boxes,
   CheckCircle2,
+  CornerUpLeft,
   FileWarning,
   FilePlus,
   FileEdit,
@@ -17,10 +18,10 @@ import {
   Trash2,
   Loader2,
   MinusCircle,
-  Circle,
 } from "lucide-react";
 import { useState } from "react";
 import { firstLine, timeAgo, truncate } from "../lib/format";
+import * as api from "../lib/tauri";
 import { useReposStore } from "../stores/reposStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useUiStore } from "../stores/uiStore";
@@ -98,6 +99,34 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
   const selectRange = useSelectionStore((s) => s.selectRange);
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(status.name);
+  const [switchingToDefault, setSwitchingToDefault] = useState(false);
+
+  const onDefault =
+    !!status.branch && status.branch === status.defaultBranch;
+
+  async function switchToDefault() {
+    if (
+      !status.defaultBranch ||
+      onDefault ||
+      switchingToDefault
+    )
+      return;
+    setSwitchingToDefault(true);
+    try {
+      await api.gitCheckout(status.id, status.defaultBranch);
+      await refreshOne(status.id);
+    } catch (e) {
+      const msg = String(e);
+      openDialog({
+        kind: "gitError",
+        title: `Can't switch to ${status.defaultBranch}`,
+        error: msg,
+        repoId: status.id,
+      });
+    } finally {
+      setSwitchingToDefault(false);
+    }
+  }
 
   function handleCheckboxClick(e: React.MouseEvent<HTMLInputElement>) {
     // stopPropagation prevents the row click from also firing and
@@ -262,22 +291,42 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
               }}
               disabled={!status.branch}
               title={
-                status.branch
-                  ? "Switch branch — click to open the branch picker"
-                  : "No branch — repo may be unborn or detached"
+                !status.branch
+                  ? "No branch — repo may be unborn or detached"
+                  : onDefault
+                    ? `On default branch (${status.defaultBranch}) — click to switch`
+                    : `On ${status.branch} — NOT the default branch (${status.defaultBranch}). Click to open the branch picker.`
               }
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-3 px-2 py-0.5 text-xs font-medium text-zinc-300 hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className={clsx(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60",
+                onDefault
+                  ? "border-border bg-surface-3 text-zinc-300 hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-200"
+                  : "border-amber-500/40 bg-amber-500/15 text-amber-200 hover:border-amber-400/60 hover:bg-amber-500/25",
+              )}
             >
               <GitBranch size={12} />
               <span className="font-mono">{status.branch || "—"}</span>
             </button>
             {status.branch &&
               status.defaultBranch &&
-              status.branch !== status.defaultBranch && (
-                <Pill tone="neutral" title="Default branch">
-                  <Circle size={8} className="opacity-60" />
-                  default: <span className="font-mono">{status.defaultBranch}</span>
-                </Pill>
+              !onDefault && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void switchToDefault();
+                  }}
+                  disabled={switchingToDefault}
+                  title={`Switch to default branch (${status.defaultBranch}) — runs \`git checkout ${status.defaultBranch}\`. Refused by git if local changes would be overwritten; stash or commit first.`}
+                  className="inline-flex items-center gap-1 rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-200 hover:border-blue-400/60 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {switchingToDefault ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <CornerUpLeft size={12} />
+                  )}
+                  <span className="font-mono">{status.defaultBranch}</span>
+                </button>
               )}
             {dirtyPill(status.dirty)}
             {status.hasSubmodules && (

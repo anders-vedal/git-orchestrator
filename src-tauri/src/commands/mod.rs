@@ -1,8 +1,11 @@
 pub mod activity;
 pub mod branch;
+pub mod cli_actions;
 pub mod git_ops;
 pub mod repos;
 pub mod scan;
 pub mod settings;
+pub mod stash;
 pub mod status;
 pub mod system;
+pub mod workspaces;

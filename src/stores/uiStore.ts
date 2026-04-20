@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { BulkPullReport, BulkResult } from "../types";
+import type {
+  ActivationReport,
+  BulkPullReport,
+  BulkResult,
+  StashPushReport,
+  StashRestoreReport,
+  UndoGroupReport,
+} from "../types";
 
 type DialogKind =
   | null
@@ -27,7 +34,47 @@ type DialogKind =
   | { kind: "bulkFetchResult"; title: string; results: BulkResult[] }
   | { kind: "bulkPullResult"; title: string; report: BulkPullReport }
   | { kind: "gitError"; title: string; error: string; repoId?: number }
-  | { kind: "info"; title: string; body: string };
+  | { kind: "info"; title: string; body: string }
+  | {
+      kind: "createWorkspace";
+      /** When present, open the dialog in edit mode for this workspace id. */
+      editId?: number;
+      /** Repo ids preselected for a fresh workspace (from selection or
+       *  the "Create from selection" menu item). Ignored in edit mode. */
+      seedRepoIds?: number[];
+    }
+  | { kind: "manageWorkspaces" }
+  | { kind: "workspaceActivationResult"; report: ActivationReport }
+  | {
+      kind: "createStash";
+      /** Repo ids to prefill the dialog with. Empty = user picks from
+       *  the dirty-repo list. */
+      seedRepoIds?: number[];
+      /** When set, after the stash succeeds the dialog calls back to
+       *  activate this workspace (used by the workspace-activation
+       *  retry flow). */
+      thenActivateWorkspaceId?: number;
+      /** Prefill the label field (e.g. "pre-NOR-876 switch"). */
+      suggestedLabel?: string;
+    }
+  | { kind: "stashes" }
+  | { kind: "recentActions" }
+  | { kind: "stashPushResult"; report: StashPushReport }
+  | { kind: "stashRestoreResult"; report: StashRestoreReport }
+  | {
+      kind: "undoGroupResult";
+      report: UndoGroupReport;
+      /** Label used in the dialog title, e.g. workspace name or "Stash
+       *  restore 'pre-NOR-876'". */
+      sourceLabel: string;
+    }
+  | {
+      kind: "update";
+      version: string;
+      currentVersion: string;
+      notes: string | null;
+      date: string | null;
+    };
 
 interface UiState {
   expandedIds: Set<number>;

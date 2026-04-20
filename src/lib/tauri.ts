@@ -7,12 +7,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActionLogEntry,
+  ActivationReport,
   ActivityEntry,
   BranchList,
   BulkPullReport,
   BulkResult,
   ChangedFiles,
   CheckoutResult,
+  CliAction,
   Commit,
   CommitPushResult,
   ConfigureHelperResult,
@@ -20,11 +22,20 @@ import type {
   ForcePullResult,
   GitSetupStatus,
   IgnoredPath,
+  RecentActionGroup,
   Repo,
   RepoStatus,
   ScanAddResult,
   ScanResult,
   SignInResult,
+  StashBundleDetail,
+  StashBundleSummary,
+  StashPushReport,
+  StashRestoreReport,
+  UndoGroupReport,
+  WorkspaceDetail,
+  WorkspaceEntryInput,
+  WorkspaceSummary,
 } from "../types";
 
 // ---- repos ----
@@ -106,11 +117,32 @@ export function gitPullAllSafe(ids?: number[]): Promise<BulkPullReport> {
 export function undoLastAction(id: number): Promise<ForcePullResult> {
   return invoke("undo_last_action", { id });
 }
+/**
+ * Roll back every repo that was touched as part of a multi-repo action
+ * group (workspace activation, stash restore). Per-repo safety gates
+ * apply — a dirty or moved-on-since repo is skipped, not clobbered. The
+ * returned report explains what was reverted and what was skipped, and
+ * `undoGroupId` identifies the action_log rows written by this pass
+ * (empty when nothing was actually reverted).
+ */
+export function undoActionGroup(groupId: string): Promise<UndoGroupReport> {
+  return invoke("undo_action_group", { groupId });
+}
 export function getActionLog(
   id: number,
   limit?: number,
 ): Promise<ActionLogEntry[]> {
   return invoke("get_action_log", { id, limit: limit ?? null });
+}
+/**
+ * Cross-repo action history — the N most recent multi-repo action
+ * groups (workspace activations, stash bundle pushes / restores,
+ * group undos). Powers the Recent Actions dialog.
+ */
+export function listRecentActionGroups(
+  limit?: number,
+): Promise<RecentActionGroup[]> {
+  return invoke("list_recent_action_groups", { limit: limit ?? null });
 }
 export function forcePullPreview(id: number): Promise<ForcePullPreview> {
   return invoke("force_pull_preview", { id });
@@ -151,6 +183,19 @@ export function getSetting(key: string): Promise<string | null> {
 }
 export function setSetting(key: string, value: string): Promise<void> {
   return invoke("set_setting", { key, value });
+}
+
+// ---- cli actions (Claude Code launcher) ----
+/** Launch Claude Code in a repo's terminal with the chosen slash command
+ *  pre-filled. Fires the configured terminal (same `terminal` setting as
+ *  Open Terminal) with a `cd <path> && claude "<slash>"` commandline. */
+export function runCliAction(id: number, actionId: string): Promise<void> {
+  return invoke("run_cli_action", { id, actionId });
+}
+/** Read the configured CLI actions. Kept server-side so the renderer
+ *  can't hand-forge entries that bypass validation. */
+export function listCliActions(): Promise<CliAction[]> {
+  return invoke("list_cli_actions");
 }
 
 // ---- branch ----
@@ -195,6 +240,77 @@ export function getActivityFeed(
     days,
     limitPerRepo: limitPerRepo ?? null,
   });
+}
+
+// ---- workspaces (Phase 2.2) ----
+export function listWorkspaces(): Promise<WorkspaceSummary[]> {
+  return invoke("list_workspaces");
+}
+export function getWorkspace(id: number): Promise<WorkspaceDetail> {
+  return invoke("get_workspace", { id });
+}
+export function createWorkspace(
+  name: string,
+  entries: WorkspaceEntryInput[],
+): Promise<WorkspaceSummary> {
+  return invoke("create_workspace", { name, entries });
+}
+export function renameWorkspace(id: number, newName: string): Promise<void> {
+  return invoke("rename_workspace", { id, newName });
+}
+export function deleteWorkspace(id: number): Promise<void> {
+  return invoke("delete_workspace", { id });
+}
+export function updateWorkspaceEntries(
+  id: number,
+  entries: WorkspaceEntryInput[],
+): Promise<void> {
+  return invoke("update_workspace_entries", { id, entries });
+}
+export function getActiveWorkspaceId(): Promise<number | null> {
+  return invoke("get_active_workspace_id");
+}
+export function setActiveWorkspaceId(id: number | null): Promise<void> {
+  return invoke("set_active_workspace_id", { id });
+}
+/** Activate a workspace — switch every listed repo to its listed branch.
+ *  Sequential, dirty-tree-safe. Returns per-repo outcomes so the UI can
+ *  show which switched and which need attention. */
+export function activateWorkspace(id: number): Promise<ActivationReport> {
+  return invoke("activate_workspace", { id });
+}
+
+// ---- stash bundles (Phase 2.3) ----
+export function listStashBundles(): Promise<StashBundleSummary[]> {
+  return invoke("list_stash_bundles");
+}
+export function getStashBundle(id: number): Promise<StashBundleDetail> {
+  return invoke("get_stash_bundle", { id });
+}
+/** Create a new stash bundle across the supplied repos. Each repo is
+ *  stashed sequentially with the label as the stash message; untracked
+ *  files are included. Returns per-repo outcomes; clean repos land in
+ *  `nothing_to_stash` (no bundle entry consumed). */
+export function createStashBundle(
+  label: string,
+  repoIds: number[],
+): Promise<StashPushReport> {
+  return invoke("create_stash_bundle", { label, repoIds });
+}
+/** Restore every pending entry in a bundle via `git stash apply`.
+ *  Successful entries are marked restored in DB but stash refs are left
+ *  in place so the user can re-apply or drop later. */
+export function restoreStashBundle(id: number): Promise<StashRestoreReport> {
+  return invoke("restore_stash_bundle", { id });
+}
+/** Delete the bundle rows. When `dropRefs` is true, also run `git stash
+ *  drop` on every still-existing stash so the repos' stash stacks stay
+ *  clean. Best-effort — individual drop failures don't block the DB delete. */
+export function deleteStashBundle(
+  id: number,
+  dropRefs: boolean,
+): Promise<void> {
+  return invoke("delete_stash_bundle", { id, dropRefs });
 }
 
 // ---- scan / ignore ----

@@ -162,12 +162,20 @@ conflict.
     from the scan dialog or the Settings → Ignored paths list.
 
 15. **Destructive ops capture pre-HEAD and log to `action_log` before
-    mutating the working tree.** Today that's `git_force_pull` and its
-    partner `undo_last_action`; any future `reset --hard`, `clean -fd`,
-    or push-force must do the same via `commands/git_ops.rs::log_action`
-    + migration `003_action_log`. This is what makes the session-level
-    Undo button and the reflog-rescue hint in the success toast work —
-    do not regress it. Full rationale in `docs/safety-model.md`.
+    mutating the working tree.** Single-repo: `git_force_pull`,
+    `git_commit_push`, and `undo_last_action` (force-pull restore).
+    Multi-repo: `workspace_activate` (`commands/workspaces.rs`),
+    stash bundle push / apply (`commands/stash.rs`), and the
+    group-scoped reverse operation `undo_action_group`
+    (`commands/git_ops.rs`). Multi-repo legs share a `group_id` via
+    `log_action_in_group`, generated once per logical action with
+    `new_action_group_id()`; that's what lets the Recent Actions
+    dialog summarise N legs as one event and what lets
+    `undo_action_group` unwind them. Any future `reset --hard`,
+    `clean -fd`, or push-force must do the same — single-repo ops
+    call `log_action`, multi-repo ops call `log_action_in_group`
+    with a shared id. Schema: migrations `003_action_log` +
+    `004_action_log_groups`. Full rationale in `docs/safety-model.md`.
 
 16. **Any future force-push must use `--force-with-lease --force-if-includes`,
     never bare `--force`.** The auto-refresh loop silently fetches in the

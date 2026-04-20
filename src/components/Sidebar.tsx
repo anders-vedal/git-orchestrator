@@ -5,7 +5,10 @@ import {
   FolderPlus,
   FolderSearch,
   GitPullRequestArrow,
+  History,
+  Layers,
   Loader2,
+  Package,
   RefreshCcw,
   Settings as SettingsIcon,
   X,
@@ -17,6 +20,7 @@ import { useSelectionStore } from "../stores/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useUiStore } from "../stores/uiStore";
 import { Button } from "./ui/Button";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 export function Sidebar() {
   const openDialog = useUiStore((s) => s.openDialog);
@@ -124,6 +128,8 @@ export function Sidebar() {
         </div>
       </div>
 
+      <WorkspaceSwitcher />
+
       <Button
         variant="primary"
         icon={<FolderPlus size={14} />}
@@ -215,6 +221,37 @@ export function Sidebar() {
           disabled={statuses.length === 0}
         >
           Activity feed
+        </Button>
+        <Button
+          icon={<History size={14} />}
+          title="Recent multi-repo actions — workspace activations, stash bundles, group undos. Click Undo on any entry to roll every repo back to the branch it was on before that action."
+          onClick={() => openDialog({ kind: "recentActions" })}
+        >
+          Recent actions
+        </Button>
+        <Button
+          icon={<Package size={14} />}
+          title={
+            hasSelection
+              ? `Stash dirty changes across the selected ${selectionCount} repo${selectionCount === 1 ? "" : "s"} as a labelled bundle — restorable together later.`
+              : "Stash dirty changes across every dirty repo as a labelled bundle — atomic 'park everything, restore together' for workspace context switches."
+          }
+          onClick={() =>
+            openDialog({
+              kind: "createStash",
+              seedRepoIds: hasSelection ? Array.from(selectedIds) : undefined,
+            })
+          }
+          disabled={statuses.length === 0}
+        >
+          {hasSelection ? `Stash selected (${selectionCount})` : "Stash dirty…"}
+        </Button>
+        <Button
+          icon={<Layers size={14} />}
+          title="Browse saved stash bundles — restore, inspect, or delete."
+          onClick={() => openDialog({ kind: "stashes" })}
+        >
+          Stash bundles
         </Button>
       </div>
 

@@ -127,6 +127,50 @@ pub fn create_and_checkout(
     run_git_raw(repo_path, &args)
 }
 
+/// Create a local tracking branch from an existing remote branch and
+/// switch to it. Used by workspace activation when an entry references
+/// a branch that only exists as `refs/remotes/origin/<name>` — matches
+/// the `git checkout <name>` DWIM behaviour without depending on git's
+/// default DWIM rules.
+pub fn checkout_tracking(
+    repo_path: &Path,
+    local_name: &str,
+    remote_ref: &str,
+) -> Result<GitOutput, GitError> {
+    run_git_raw(
+        repo_path,
+        &["checkout", "-b", local_name, "--track", remote_ref],
+    )
+}
+
+/// Classify existence of a branch name for workspace activation.
+/// Returns `Local` if a local ref exists, `RemoteOnly(remote_ref)` if
+/// at least one remote-tracking ref matches (prefers `origin/<name>`),
+/// or `Missing` if neither.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BranchLocation {
+    Local,
+    RemoteOnly(String),
+    Missing,
+}
+
+pub fn locate_branch(repo_path: &Path, name: &str) -> Result<BranchLocation, GitError> {
+    let list = list_branches(repo_path)?;
+    if list.local.iter().any(|b| b.name == name) {
+        return Ok(BranchLocation::Local);
+    }
+    // Prefer origin/<name>; otherwise take the first remote that ends in "/<name>".
+    let suffix = format!("/{name}");
+    let origin = format!("origin/{name}");
+    if let Some(m) = list.remote.iter().find(|b| b.name == origin) {
+        return Ok(BranchLocation::RemoteOnly(m.name.clone()));
+    }
+    if let Some(m) = list.remote.iter().find(|b| b.name.ends_with(&suffix)) {
+        return Ok(BranchLocation::RemoteOnly(m.name.clone()));
+    }
+    Ok(BranchLocation::Missing)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
