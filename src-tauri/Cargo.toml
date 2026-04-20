@@ -1,6 +1,6 @@
 [package]
 name = "repo-dashboard"
-version = "0.3.0-dev"
+version = "0.2.4"
 description = "Repo Dashboard — local git repo sync/status dashboard"
 authors = ["Nordlabs"]
 edition = "2021"
