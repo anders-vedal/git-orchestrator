@@ -16,6 +16,14 @@ name: Release
 #
 # Generate with: `npm run tauri signer generate -- -w ~/.tauri/repo-dashboard.key`.
 # Store the public key verbatim in `src-tauri/tauri.conf.json` → plugins.updater.pubkey.
+#
+# TODO(linux): Linux is intentionally omitted from the matrix. Bundling the
+# AppImage via `linuxdeploy` fails on Ubuntu 24.04 runners even with
+# `libfuse2` + `kernel.apparmor_restrict_unprivileged_userns=0`; `linuxdeploy`
+# dies silently after "Bundling *.AppImage...". Linux users should build
+# from source (`npm run tauri build`) — see README "Build from source".
+# Revisit when either tauri-action adds a reliable Linux recipe or we move
+# the Linux build to a self-hosted runner with userns unblocked.
 
 on:
   push:
@@ -36,30 +44,10 @@ jobs:
             args: ""
           - platform: macos-latest
             args: "--target universal-apple-darwin"
-          - platform: ubuntu-latest
-            args: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Linux build deps
-        if: matrix.platform == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libsoup-3.0-dev \
-            libayatana-appindicator3-dev \
-            build-essential \
-            libssl-dev \
-            libxdo-dev \
-            libfuse2 \
-            pkg-config
-          # Ubuntu 24.04 blocks unprivileged user namespaces by default,
-          # which linuxdeploy needs to build the AppImage. Flip the sysctl
-          # knob so `npm run tauri build` can bundle the AppImage bundle.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - uses: actions/setup-node@v4
         with:

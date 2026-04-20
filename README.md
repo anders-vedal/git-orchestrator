@@ -48,10 +48,19 @@ Pre-built signed installers are attached to every GitHub release:
 |---|---|
 | Windows (x64 / ARM64) | `Repo Dashboard_<ver>_x64-setup.exe` (NSIS) or `Repo Dashboard_<ver>_x64_en-US.msi` |
 | macOS (universal) | `Repo Dashboard_<ver>_universal.dmg` — unsigned; first launch needs `xattr -cr "/Applications/Repo Dashboard.app"` |
-| Linux (Ubuntu/Debian) | `repo-dashboard_<ver>_amd64.deb` or `repo-dashboard_<ver>_amd64.AppImage` |
+| Linux | **No prebuilt installer** — [build from source](#build-from-source). See [TODO](#known-issues--todos) below. |
 
-Existing installs auto-update from the same release feed via the Tauri updater plugin
-(signed with the project's minisign key).
+Existing Windows/macOS installs auto-update from the same release feed via the
+Tauri updater plugin (signed with the project's minisign key).
+
+### Known issues / TODOs
+
+- **Linux installer is TODO.** The Linux job was dropped from the release
+  matrix because `linuxdeploy` (used by Tauri to bundle `.AppImage`) fails
+  silently on Ubuntu 24.04 GitHub runners even after installing `libfuse2`
+  and clearing the AppArmor userns restriction. Linux users need to build
+  the app manually from source — see the [Build from source](#build-from-source)
+  section. Tracked in `.github/workflows/release.yml` (`TODO(linux)` comment).
 
 ## Build from source
 
