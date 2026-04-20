@@ -56,6 +56,10 @@ jobs:
             libxdo-dev \
             libfuse2 \
             pkg-config
+          # Ubuntu 24.04 blocks unprivileged user namespaces by default,
+          # which linuxdeploy needs to build the AppImage. Flip the sysctl
+          # knob so `npm run tauri build` can bundle the AppImage bundle.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - uses: actions/setup-node@v4
         with:
