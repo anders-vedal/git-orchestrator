@@ -294,6 +294,55 @@ src/
   2. Create the component under `components/dialogs/`
   3. Render it in `App.tsx` (it inspects `useUiStore().dialog`)
 
+## Releasing
+
+The app ships signed installers via the Tauri auto-updater. The Release
+workflow (`.github/workflows/release.yml`) **only fires on a `v*` tag
+push** — merging to `main` alone produces nothing. A merge without a
+follow-up tag leaves every running install stuck on the previous
+version with no "Check for updates" path forward. Real incident:
+PR #17 merged 2026-04-20 with no bump; PR #18 (v0.2.6) had to be cut
+nine days later to re-enable the updater.
+
+**Rule for Claude: any time you open a PR against `main` that touches
+`src/`, `src-tauri/src/`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`,
+or `package.json`, ask the user whether this change warrants a release.**
+If yes, either bundle the version bump into the same PR or queue a
+follow-up bump PR before tagging. Ask once per PR — don't nag if the
+user says "no, batch this with the next one".
+
+**Cutting a release** (after the change PR has merged to `main`):
+
+1. Branch from `main`: `git checkout -b release/vX.Y.Z`
+2. Bump version in **all four** files in lockstep — version drift
+   between any of these will fail the Release build:
+   - `package.json` (`version`)
+   - `src-tauri/Cargo.toml` (`[package] version`)
+   - `src-tauri/Cargo.lock` (the `repo-dashboard` package entry,
+     ~line 3271 — edit directly, no need to run `cargo build` just
+     for the version line)
+   - `src-tauri/tauri.conf.json` (top-level `version`)
+3. Commit, push, open PR titled `Bump to vX.Y.Z`, wait for the
+   Cross-platform check to go green, squash-merge.
+4. Tag the merge commit and push: `git tag -a vX.Y.Z -m "Repo Dashboard vX.Y.Z" && git push origin vX.Y.Z`
+5. The Release workflow then builds + signs MSI/NSIS/dmg/app.tar.gz,
+   uploads them and `latest.json` to the GitHub Release. The running
+   app polls the updater endpoint and picks up the new version on
+   next "Check for updates".
+
+**Versioning policy**: semver, but pre-1.0 we treat MINOR as breaking
+and PATCH as feature/fix. The history so far (`0.1.0` → `0.2.6`) is
+PATCH-per-release. Bump MINOR (`0.3.0`) only when the schema, IPC
+surface, or settings format changes in a way that an older binary
+couldn't roll back to.
+
+**Required GitHub repo secrets** (already configured on
+`NordlabsAS/git-orchestrator`): `TAURI_SIGNING_PRIVATE_KEY` +
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. If a future repo transfer drops
+these, the Release build will succeed but produce unsigned binaries
+that the auto-updater rejects — verify they exist with `gh secret list`
+before tagging.
+
 ## Non-goals (reject scope creep)
 
 Not a full git GUI (no hunk-level staging, no interactive rebase, no
