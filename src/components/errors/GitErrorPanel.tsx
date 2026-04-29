@@ -9,8 +9,9 @@ import {
   ShieldAlert,
   ShieldCheck,
   Terminal,
+  Wand2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as api from "../../lib/tauri";
 import { classifyGitError, type ClassifiedGitError } from "../../lib/gitErrors";
 import { parseRemote, sshDocsUrl } from "../../lib/providers";
@@ -20,6 +21,7 @@ import { Button } from "../ui/Button";
 const CATEGORY_ICON: Record<ClassifiedGitError["category"], typeof AlertTriangle> = {
   auth_ssh: Lock,
   auth_https: Lock,
+  auth_no_helper: KeyRound,
   cert_invalid: ShieldAlert,
   dirty_tree: AlertTriangle,
   not_ffable: AlertTriangle,
@@ -46,6 +48,37 @@ export function GitErrorPanel({ error, repoId }: Props) {
   const [signInBusy, setSignInBusy] = useState(false);
   const [signInMessage, setSignInMessage] = useState<string | null>(null);
   const [signInError, setSignInError] = useState<string | null>(null);
+
+  // Credential-helper probe + one-click configure flow. Runs only when the
+  // failure category is auth-related, so we don't fan out an extra git
+  // call on every "branch diverged" or "network down" error.
+  const [helperConfigured, setHelperConfigured] = useState<boolean | null>(
+    null,
+  );
+  const [configureBusy, setConfigureBusy] = useState(false);
+  const [configureMessage, setConfigureMessage] = useState<string | null>(null);
+  const [configureError, setConfigureError] = useState<string | null>(null);
+
+  const isAuthCategory =
+    classified.category === "auth_no_helper" ||
+    classified.category === "auth_https" ||
+    classified.category === "auth_ssh";
+
+  useEffect(() => {
+    if (!isAuthCategory) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const s = await api.gitSetupStatus();
+        if (!cancelled) setHelperConfigured(s.credentialHelperSet);
+      } catch {
+        if (!cancelled) setHelperConfigured(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthCategory]);
 
   const refreshOne = useReposStore((s) => s.refreshOne);
   const remoteUrl = useReposStore((s) =>
@@ -90,12 +123,40 @@ export function GitErrorPanel({ error, repoId }: Props) {
     }
   }
 
+  async function configureHelper() {
+    setConfigureBusy(true);
+    setConfigureError(null);
+    setConfigureMessage(null);
+    try {
+      const result = await api.configureCredentialHelper();
+      setConfigureMessage(result.message);
+      setHelperConfigured(true);
+      // Auto-retry sign-in with the freshly configured helper so the user
+      // sees the browser/credential popup without a second click.
+      if (repoId !== undefined) {
+        await signIn();
+      }
+    } catch (e) {
+      setConfigureError(String(e));
+    } finally {
+      setConfigureBusy(false);
+    }
+  }
+
   // Provider-aware CTA label. Falls back to generic "Sign in" when the
   // host isn't one we recognise.
   const signInLabel =
     remote.provider === "other"
       ? "Sign in to remote"
       : `Sign in to ${remote.label}`;
+
+  // The "Set up credential helper" CTA shows whenever git couldn't
+  // resolve credentials and we know — or can't yet rule out — that no
+  // helper is wired up at the global scope. `auth_no_helper` is a hard
+  // signal; `auth_https` is conditional on the probe returning false.
+  const showConfigureHelper =
+    classified.category === "auth_no_helper" ||
+    (classified.category === "auth_https" && helperConfigured === false);
 
   return (
     <div className="space-y-3">
@@ -108,22 +169,40 @@ export function GitErrorPanel({ error, repoId }: Props) {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {classified.category === "auth_https" && repoId !== undefined && (
+        {showConfigureHelper && (
           <Button
             variant="primary"
-            onClick={() => void signIn()}
-            disabled={signInBusy}
+            onClick={() => void configureHelper()}
+            disabled={configureBusy || signInBusy}
             icon={
-              signInBusy ? (
+              configureBusy ? (
                 <Loader2 size={14} className="animate-spin" />
               ) : (
-                <KeyRound size={14} />
+                <Wand2 size={14} />
               )
             }
           >
-            {signInBusy ? "Waiting for sign-in…" : signInLabel}
+            {configureBusy ? "Configuring…" : "Set up credential helper"}
           </Button>
         )}
+        {classified.category === "auth_https" &&
+          !showConfigureHelper &&
+          repoId !== undefined && (
+            <Button
+              variant="primary"
+              onClick={() => void signIn()}
+              disabled={signInBusy}
+              icon={
+                signInBusy ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <KeyRound size={14} />
+                )
+              }
+            >
+              {signInBusy ? "Waiting for sign-in…" : signInLabel}
+            </Button>
+          )}
         {classified.category === "auth_ssh" && docsUrl && (
           <a
             href={docsUrl}
@@ -155,6 +234,17 @@ export function GitErrorPanel({ error, repoId }: Props) {
           </Button>
         )}
       </div>
+
+      {configureMessage && (
+        <div className="rounded border border-emerald-900/60 bg-emerald-950/20 px-2.5 py-2 text-xs text-emerald-200">
+          {configureMessage}
+        </div>
+      )}
+      {configureError && (
+        <div className="rounded border border-red-900/60 bg-red-950/20 px-2.5 py-2 text-xs text-red-300">
+          Couldn&apos;t configure helper: {configureError}
+        </div>
+      )}
 
       {signInMessage && (
         <div

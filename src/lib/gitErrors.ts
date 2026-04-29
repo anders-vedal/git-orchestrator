@@ -17,6 +17,7 @@
 export type GitErrorCategory =
   | "auth_ssh"
   | "auth_https"
+  | "auth_no_helper"
   | "cert_invalid"
   | "dirty_tree"
   | "not_ffable"
@@ -82,6 +83,23 @@ export function classifyGitError(rawInput: string): ClassifiedGitError {
       category: "auth_ssh",
       title: "SSH authentication failed",
       hint: "Run `ssh -T git@<host>` in a terminal to accept the host key or unlock your SSH key. If you use an SSH passphrase, ensure ssh-agent is running — GUIs cannot prompt for passphrases.",
+      diagnosable: true,
+      raw,
+    };
+  }
+
+  // No credential helper — git fell through to its tty-bound askpass
+  // fallback because no helper handled the request. Classify BEFORE
+  // `auth_https` so the more specific match wins.
+  if (
+    lower.includes("/dev/tty: no such device or address") ||
+    lower.includes("failed to execute prompt script") ||
+    lower.includes("terminal prompts disabled")
+  ) {
+    return {
+      category: "auth_no_helper",
+      title: "No credential helper is handling sign-in",
+      hint: "Git tried to prompt for credentials, but no credential helper picked up the request. Set up Git Credential Manager so the next sign-in pops a browser window and saves the result to your OS keychain.",
       diagnosable: true,
       raw,
     };

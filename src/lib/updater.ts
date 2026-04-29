@@ -8,6 +8,7 @@
  * this file so argument shapes stay in one place and tests can mock a
  * single module.
  */
+import { getVersion } from "@tauri-apps/api/app";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 
@@ -87,4 +88,11 @@ export async function installPendingUpdate(
  *  the one NSIS/MSI already handled. */
 export async function relaunchApp(): Promise<void> {
   await relaunch();
+}
+
+/** Read the running app's version (sourced from `tauri.conf.json` at
+ *  build time). Useful for the Updates section in Settings so the user
+ *  can confirm which build they're on before/after an update check. */
+export async function getAppVersion(): Promise<string> {
+  return await getVersion();
 }

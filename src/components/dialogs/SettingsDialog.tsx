@@ -17,7 +17,7 @@ import {
 import { timeAgo } from "../../lib/format";
 import { getPlatform, type HostOS } from "../../lib/platform";
 import * as api from "../../lib/tauri";
-import { checkForUpdate } from "../../lib/updater";
+import { checkForUpdate, getAppVersion } from "../../lib/updater";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useUiStore } from "../../stores/uiStore";
 import type {
@@ -86,6 +86,17 @@ export function SettingsDialog() {
     | { kind: "upToDate" }
     | { kind: "error"; message: string }
   >({ kind: "idle" });
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getAppVersion().then((v) => {
+      if (!cancelled) setAppVersion(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -484,6 +495,12 @@ export function SettingsDialog() {
 
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-zinc-400">Updates</span>
+          <div className="text-xs text-zinc-400">
+            Current version:{" "}
+            <span className="font-mono text-zinc-200">
+              {appVersion ?? "…"}
+            </span>
+          </div>
           <label className="flex items-center gap-2 text-sm text-zinc-200">
             <input
               type="checkbox"
