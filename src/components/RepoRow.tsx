@@ -27,9 +27,17 @@ interface Props {
   /** Ordered ids of the currently-visible rows — needed for shift+click
    *  range selection. Pass from RepoList's memoized `visible`. */
   visibleIds: number[];
+  /** Position in the visible list. Drives subtle zebra striping so rows
+   *  with similar state (e.g. multiple clean repos) are visually distinct. */
+  index: number;
 }
 
-export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
+export function RepoRow({
+  status,
+  dragDisabled = false,
+  visibleIds,
+  index,
+}: Props) {
   const isExpanded = useUiStore((s) => s.expandedIds.has(status.id));
   const openDialog = useUiStore((s) => s.openDialog);
   const refreshOne = useReposStore((s) => s.refreshOne);
@@ -113,9 +121,18 @@ export function RepoRow({ status, dragDisabled = false, visibleIds }: Props) {
       }}
       style={style}
       className={clsx(
-        "border-b border-border bg-surface-1 transition-opacity",
+        "border-b border-border transition",
+        // Background: selected wins; otherwise alternate between surface-1
+        // and a slightly lighter shade so adjacent rows are easier to
+        // tell apart while scanning. All rows get a hover bump so the
+        // currently-pointed-at row is unambiguous, regardless of dim state.
+        isSelected
+          ? "bg-blue-500/[0.06] hover:bg-blue-500/[0.10]"
+          : index % 2 === 0
+            ? "bg-surface-1 hover:bg-surface-2"
+            : "bg-[#161a22] hover:bg-surface-2",
         shouldDim && "opacity-60 hover:opacity-100 focus-within:opacity-100",
-        isSelected && "bg-blue-500/[0.06] border-l-2 border-l-blue-400 pl-0",
+        isSelected && "border-l-2 border-l-blue-400 pl-0",
         isFocused && "ring-1 ring-inset ring-blue-400/60",
         isDragging && "repo-row--dragging",
       )}

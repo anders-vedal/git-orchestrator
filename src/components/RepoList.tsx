@@ -122,12 +122,13 @@ export function RepoList() {
               items={visible.map((s) => s.id)}
               strategy={verticalListSortingStrategy}
             >
-              {visible.map((s) => (
+              {visible.map((s, i) => (
                 <RepoRow
                   key={s.id}
                   status={s}
                   dragDisabled={!dragEnabled}
                   visibleIds={visibleIds}
+                  index={i}
                 />
               ))}
             </SortableContext>
