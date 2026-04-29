@@ -386,3 +386,16 @@ export function ignorePath(path: string): Promise<void> {
 export function unignorePath(path: string): Promise<void> {
   return invoke("unignore_path", { path });
 }
+
+// ---- autostart (launch at login) ----
+// These three wrap the `tauri-plugin-autostart` JS API. The plugin owns
+// the OS-level registration (Windows: HKCU Run key; macOS: LaunchAgent;
+// Linux: .desktop entry). State is read directly from that registration —
+// we deliberately do NOT mirror it into our own settings table because
+// the OS can disable autostart out from under us (e.g. Task Manager →
+// Startup apps), and a duplicate setting would drift.
+export {
+  enable as enableAutostart,
+  disable as disableAutostart,
+  isEnabled as isAutostartEnabled,
+} from "@tauri-apps/plugin-autostart";

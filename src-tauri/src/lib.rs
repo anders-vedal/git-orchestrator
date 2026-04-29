@@ -9,6 +9,15 @@ use commands::{
     activity, auto_fetch, branch, cli_actions, git_ops, repos, scan, settings, stash, status,
     system, workspaces,
 };
+use tauri::Manager;
+use tauri_plugin_autostart::MacosLauncher;
+
+/// CLI flag passed by the autostart launcher so the app boots straight to
+/// the tray instead of popping the main window in the user's face on every
+/// login. The autostart plugin appends this to the launch command we
+/// register with the OS (Run-key on Windows, LaunchAgent on macOS,
+/// .desktop file on Linux).
+const ARG_MINIMIZED: &str = "--minimized";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -17,15 +26,26 @@ pub fn run() {
         std::process::exit(1);
     }
 
+    let started_minimized = std::env::args().any(|a| a == ARG_MINIMIZED);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec![ARG_MINIMIZED]),
+        ))
+        .setup(move |app| {
             tray::build(app.handle())?;
             auto_fetch::spawn_scheduler(app.handle().clone());
+            if started_minimized {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| tray::on_window_event(window, event))

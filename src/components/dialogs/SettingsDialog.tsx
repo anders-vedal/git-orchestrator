@@ -87,6 +87,12 @@ export function SettingsDialog() {
     | { kind: "error"; message: string }
   >({ kind: "idle" });
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [autostart, setAutostart] = useState<{
+    loaded: boolean;
+    enabled: boolean;
+    busy: boolean;
+    error: string | null;
+  }>({ loaded: false, enabled: false, busy: false, error: null });
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +135,49 @@ export function SettingsDialog() {
       void refreshIgnored();
     }
   }, [open, settings, refreshIgnored]);
+
+  // Reads the OS-level autostart state every time the dialog opens.
+  // The OS is the source of truth (user may have disabled it via Task
+  // Manager → Startup apps), so we re-query on each open rather than
+  // caching across mounts.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setAutostart((s) => ({ ...s, loaded: false, error: null }));
+    void api
+      .isAutostartEnabled()
+      .then((enabled) => {
+        if (cancelled) return;
+        setAutostart({ loaded: true, enabled, busy: false, error: null });
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setAutostart({
+          loaded: true,
+          enabled: false,
+          busy: false,
+          error: String(e),
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  async function toggleAutostart(next: boolean) {
+    setAutostart((s) => ({ ...s, busy: true, error: null }));
+    try {
+      if (next) await api.enableAutostart();
+      else await api.disableAutostart();
+      // Re-read rather than trust our optimistic value — protects against
+      // partial failures where the plugin returns ok but the registration
+      // didn't actually change (e.g. anti-virus blocking the registry write).
+      const enabled = await api.isAutostartEnabled();
+      setAutostart({ loaded: true, enabled, busy: false, error: null });
+    } catch (e) {
+      setAutostart((s) => ({ ...s, busy: false, error: String(e) }));
+    }
+  }
 
   async function unignore(path: string) {
     try {
@@ -494,6 +543,37 @@ export function SettingsDialog() {
         </div>
 
         <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-zinc-400">Launch at login</span>
+          <label
+            className={`flex items-center gap-2 text-sm text-zinc-200 ${
+              !autostart.loaded || autostart.busy ? "opacity-60" : ""
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={autostart.enabled}
+              disabled={!autostart.loaded || autostart.busy}
+              onChange={(e) => void toggleAutostart(e.currentTarget.checked)}
+              className="h-3.5 w-3.5 accent-blue-500"
+            />
+            Start Git Repo Dashboard automatically when I sign in
+            {autostart.busy && (
+              <Loader2 size={12} className="animate-spin text-zinc-400" />
+            )}
+          </label>
+          <span className="text-[11px] text-zinc-500">
+            Boots straight to the tray (no window pop-up). Toggle this off
+            here, or in Windows Settings → Apps → Startup, if it gets in
+            the way.
+          </span>
+          {autostart.error && (
+            <span className="text-xs text-red-300" title={autostart.error}>
+              {autostart.error}
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-zinc-400">Updates</span>
           <div className="text-xs text-zinc-400">
             Current version:{" "}
@@ -533,6 +613,21 @@ export function SettingsDialog() {
               <span className="text-xs text-red-300">{updateCheckState.message}</span>
             )}
           </div>
+          <span className="text-[11px] text-zinc-500">
+            Stuck on a bad version?{" "}
+            <button
+              type="button"
+              onClick={() =>
+                void api.openUrl(
+                  "https://github.com/NordlabsAS/git-orchestrator/releases",
+                )
+              }
+              className="text-blue-300 hover:underline"
+            >
+              Download an older release
+            </button>{" "}
+            and run the installer over the top to roll back.
+          </span>
         </div>
 
         <div className="flex flex-col gap-1">

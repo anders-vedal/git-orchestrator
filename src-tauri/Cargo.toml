@@ -1,7 +1,7 @@
 [package]
 name = "repo-dashboard"
-version = "0.2.9"
-description = "Repo Dashboard — local git repo sync/status dashboard"
+version = "0.2.10"
+description = "Git Repo Dashboard — local git repo sync/status dashboard"
 authors = ["Nordlabs"]
 edition = "2021"
 
@@ -19,6 +19,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-os = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }

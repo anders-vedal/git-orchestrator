@@ -32,7 +32,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .ok_or_else(|| tauri::Error::AssetNotFound("default_window_icon".into()))?;
 
     TrayIconBuilder::<R>::with_id(TRAY_ID)
-        .tooltip("Repo Dashboard")
+        .tooltip("Git Repo Dashboard")
         .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)

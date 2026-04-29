@@ -6,7 +6,7 @@ import type { RepoStatus } from "../types";
  *
  * Format (Windows tooltips wrap at ~127 chars; we keep it compact):
  *
- *   [NOR-876] Repo Dashboard — 12 repos
+ *   [NOR-876] Git Repo Dashboard — 12 repos
  *   3 behind · 1 ahead · 2 dirty · 1 error
  *   attention: recruitment (behind 3), cortex (dirty)
  *
@@ -19,7 +19,7 @@ export function buildTooltip(
 ): string {
   const wsPrefix = activeWorkspaceName ? `[${activeWorkspaceName}] ` : "";
   if (statuses.length === 0) {
-    return `${wsPrefix}Repo Dashboard — no repos registered`;
+    return `${wsPrefix}Git Repo Dashboard — no repos registered`;
   }
 
   let behind = 0;
@@ -52,7 +52,7 @@ export function buildTooltip(
     }
   }
 
-  const head = `${wsPrefix}Repo Dashboard — ${statuses.length} repo${statuses.length === 1 ? "" : "s"}`;
+  const head = `${wsPrefix}Git Repo Dashboard — ${statuses.length} repo${statuses.length === 1 ? "" : "s"}`;
   const summary = [
     diverged > 0 ? `${diverged} diverged` : null,
     behind > 0 ? `${behind} behind` : null,

@@ -234,7 +234,7 @@ export function Sidebar() {
         </div>
         <div className="flex flex-col">
           <div className="text-sm font-semibold text-zinc-100">
-            Repo Dashboard
+            Git Repo Dashboard
           </div>
           <div className="text-[11px] text-zinc-500">
             {statuses.length} repos
